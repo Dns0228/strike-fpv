@@ -2,6 +2,9 @@ export type GameAudio = {
   unlock: () => void;
   setMuted: (muted: boolean) => void;
   props: (throttle: number) => void;
+  engine: (amount: number) => void;
+  buzz: (amount: number) => void;
+  step: () => void;
   shot: () => void;
   explode: (size: number) => void;
   hit: () => void;
@@ -16,8 +19,12 @@ export function createAudio(): GameAudio {
   let master: GainNode | null = null;
   let sfx: GainNode | null = null;
   let propGain: GainNode | null = null;
+  let engineGain: GainNode | null = null;
+  let buzzGain: GainNode | null = null;
   let propOsc: OscillatorNode | null = null;
   let propOsc2: OscillatorNode | null = null;
+  let engineOsc: OscillatorNode | null = null;
+  let buzzOsc: OscillatorNode | null = null;
   let muted = false;
   let lastLock = 0;
 
@@ -28,11 +35,17 @@ export function createAudio(): GameAudio {
     master = ctx.createGain();
     sfx = ctx.createGain();
     propGain = ctx.createGain();
+    engineGain = ctx.createGain();
+    buzzGain = ctx.createGain();
     sfx.gain.value = 0.7;
     propGain.gain.value = 0;
+    engineGain.gain.value = 0;
+    buzzGain.gain.value = 0;
     master.gain.value = muted ? 0 : 0.55;
     sfx.connect(master);
     propGain.connect(master);
+    engineGain.connect(master);
+    buzzGain.connect(master);
     master.connect(ctx.destination);
 
     propOsc = ctx.createOscillator();
@@ -49,6 +62,27 @@ export function createAudio(): GameAudio {
     filt.connect(propGain);
     propOsc.start();
     propOsc2.start();
+
+    engineOsc = ctx.createOscillator();
+    engineOsc.type = "sawtooth";
+    engineOsc.frequency.value = 42;
+    const eFilt = ctx.createBiquadFilter();
+    eFilt.type = "lowpass";
+    eFilt.frequency.value = 180;
+    engineOsc.connect(eFilt);
+    eFilt.connect(engineGain);
+    engineOsc.start();
+
+    buzzOsc = ctx.createOscillator();
+    buzzOsc.type = "square";
+    buzzOsc.frequency.value = 90;
+    const bFilt = ctx.createBiquadFilter();
+    bFilt.type = "bandpass";
+    bFilt.frequency.value = 320;
+    bFilt.Q.value = 2.4;
+    buzzOsc.connect(bFilt);
+    bFilt.connect(buzzGain);
+    buzzOsc.start();
     return ctx;
   }
 
@@ -86,6 +120,33 @@ export function createAudio(): GameAudio {
       propGain.gain.setTargetAtTime(level, t, 0.08);
       propOsc.frequency.setTargetAtTime(55 + throttle * 90, t, 0.08);
       propOsc2.frequency.setTargetAtTime(110 + throttle * 160, t, 0.08);
+    },
+    engine: (amount) => {
+      if (!ctx || !engineGain || !engineOsc) return;
+      const t = ctx.currentTime;
+      engineGain.gain.setTargetAtTime(Math.max(0, amount) * 0.16, t, 0.1);
+      engineOsc.frequency.setTargetAtTime(36 + amount * 70, t, 0.1);
+    },
+    buzz: (amount) => {
+      if (!ctx || !buzzGain || !buzzOsc) return;
+      const t = ctx.currentTime;
+      buzzGain.gain.setTargetAtTime(Math.max(0, amount) * 0.09, t, 0.12);
+      buzzOsc.frequency.setTargetAtTime(70 + amount * 140, t, 0.12);
+    },
+    step: () => {
+      const c = ensure();
+      const t = c.currentTime;
+      const src = c.createBufferSource();
+      src.buffer = noiseBuffer(0.08);
+      const filt = c.createBiquadFilter();
+      filt.type = "lowpass";
+      filt.frequency.value = 420 + Math.random() * 180;
+      const g = c.createGain();
+      env(g, t, 0.002, 0.07, 0.12 + Math.random() * 0.05);
+      src.connect(filt);
+      filt.connect(g);
+      g.connect(sfx!);
+      src.start(t);
     },
     shot: () => {
       const c = ensure();
@@ -192,6 +253,8 @@ export function createAudio(): GameAudio {
       try {
         propOsc?.stop();
         propOsc2?.stop();
+        engineOsc?.stop();
+        buzzOsc?.stop();
         void ctx?.close();
       } catch {
         /* ignore */

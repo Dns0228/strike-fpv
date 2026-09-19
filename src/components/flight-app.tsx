@@ -7,12 +7,14 @@ import { Overlays } from "@/components/overlays";
 import { ReplayHud } from "@/components/replay-hud";
 import { RotateHint } from "@/components/rotate-hint";
 import { TouchControls } from "@/components/touch-controls";
+import { isGroundSeat } from "@/game/modes";
 import { lockLandscape } from "@/game/orientation";
 
 export function FlightApp() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [game, setGame] = useState<GameHandle | null>(null);
   const phase = useGameStore((s) => s.phase);
+  const mode = useGameStore((s) => s.mode);
 
   useEffect(() => {
     loadSettings();
@@ -46,7 +48,7 @@ export function FlightApp() {
           if (phase === "flight") game?.input.requestLock();
         }}
       />
-      <div className="fpv-grade absolute inset-0 z-[8]" />
+      {phase === "flight" && !isGroundSeat(mode) ? <div className="fpv-grade absolute inset-0 z-[8]" /> : null}
       {phase === "hangar" ? <Hangar onStart={start} ready={!!game} /> : null}
       {phase === "flight" || phase === "pause" ? <Hud /> : null}
       {phase === "replay" ? <ReplayHud onSkip={() => game?.skipReplay()} /> : null}

@@ -55,19 +55,19 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, coarse ? 1.35 : 2));
   renderer.setSize(canvas.clientWidth || window.innerWidth, canvas.clientHeight || window.innerHeight, false);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.08;
+  renderer.toneMappingExposure = 1.22;
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(88, 1, 0.12, 700);
   scene.add(camera);
 
-  const hemi = new THREE.HemisphereLight(0xffe4c4, 0x3a4030, 0.72);
+  const hemi = new THREE.HemisphereLight(0xe4eef6, 0x4e5e3a, 0.95);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffe0b0, 2.05);
-  sun.position.set(-90, 110, -70);
+  const sun = new THREE.DirectionalLight(0xfff3dc, 2.28);
+  sun.position.set(-55, 150, -35);
   sun.castShadow = true;
   const map = coarse ? 1024 : 2048;
   sun.shadow.mapSize.set(map, map);
@@ -82,10 +82,10 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   scene.add(sun);
   scene.add(sun.target);
 
-  const fill = new THREE.DirectionalLight(0x8aa0b4, 0.32);
-  fill.position.set(50, 18, 90);
+  const fill = new THREE.DirectionalLight(0xa8c4dc, 0.42);
+  fill.position.set(50, 28, 90);
   scene.add(fill);
-  const bounce = new THREE.DirectionalLight(0x6a7a48, 0.18);
+  const bounce = new THREE.DirectionalLight(0x7a8c50, 0.22);
   bounce.position.set(0, -20, 10);
   scene.add(bounce);
 
@@ -113,6 +113,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   let lastLock = false;
   let pendingAfterReplay: "flight" | "dead" | "victory" | "dead-continue" | null = null;
   let fireLatch = false;
+  let lastTod: "day" | "night" | null = null;
 
   const best = Number(localStorage.getItem(BEST_SCORE_KEY) || "0") || 0;
   const bestGround = Number(localStorage.getItem(BEST_GROUND_KEY) || "0") || 0;
@@ -136,6 +137,29 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   const ro = new ResizeObserver(resize);
   if (canvas.parentElement) ro.observe(canvas.parentElement);
   window.addEventListener("resize", resize);
+
+  function followSun(x: number, z: number) {
+    const night = lastTod === "night";
+    sun.position.set(x + (night ? 48 : -55), night ? 88 : 150, z + (night ? 70 : -35));
+    sun.target.position.set(x, 0, z);
+    sun.target.updateMatrixWorld();
+  }
+
+  function applyTod(tod: "day" | "night") {
+    const night = tod === "night";
+    lastTod = tod;
+    world.setNight(night);
+    ground.setNight(night);
+    hemi.color.setHex(night ? 0x8aa0c8 : 0xe4eef6);
+    hemi.groundColor.setHex(night ? 0x1a2218 : 0x4e5e3a);
+    hemi.intensity = night ? 0.32 : 0.95;
+    sun.color.setHex(night ? 0xa8c4e8 : 0xfff3dc);
+    sun.intensity = night ? 0.28 : 2.28;
+    sun.position.set(night ? 48 : -55, night ? 88 : 150, night ? 70 : -35);
+    fill.intensity = night ? 0.1 : 0.42;
+    bounce.intensity = night ? 0.05 : 0.22;
+    renderer.toneMappingExposure = night ? 0.78 : 1.22;
+  }
 
   function setPhase(phase: "hangar" | "flight" | "pause" | "dead" | "victory" | "replay") {
     useGameStore.getState().patch({ phase });
@@ -213,7 +237,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       replay: null,
       detect: 0,
       locked: false,
-      message: "Штурм. Зелёный круг — линия фронта. Прячьтесь от FPV.",
+      message: "W — ход, мышь — камера. Зелёный круг на ленте. Прячьтесь в рощах и у домов.",
     });
     input.requestLock();
   }
@@ -423,6 +447,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       if (e.type === "spotted") audio.warning();
       if (e.type === "lock") audio.lock();
       if (e.type === "dive") audio.warning();
+      if (e.type === "step") audio.step();
       if (e.type === "boom") {
         audio.explode(1.2);
         sim.boomAt(e.x, e.y, e.z, 1.1);
@@ -531,10 +556,10 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
 
   function cinematic(dt: number) {
     cineT += dt;
-    const cx = 8 + Math.cos(cineT * 0.1) * 78;
-    const cz = 18 + Math.sin(cineT * 0.1) * 64;
-    camera.position.set(cx, 18 + Math.sin(cineT * 0.16) * 4.5, cz);
-    camera.lookAt(22, 1.6, -38);
+    const cx = 12 + Math.cos(cineT * 0.075) * 92;
+    const cz = 28 + Math.sin(cineT * 0.075) * 78;
+    camera.position.set(cx, 34 + Math.sin(cineT * 0.12) * 6, cz);
+    camera.lookAt(18, 1.6, 18);
     camera.fov = 48;
     camera.updateProjectionMatrix();
   }
@@ -554,6 +579,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       infil.setActive(false);
     }
     audio.setMuted(st.muted);
+    if (st.tod !== lastTod) applyTod(st.tod);
     if (st.weapon !== sim.weapon) sim.setWeapon(st.weapon);
     const actions = input.sample(st.invertY);
     const mouse = flying || replaying ? input.consumeMouse() : (input.consumeMouse(), { dx: 0, dy: 0 });
@@ -582,6 +608,12 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     if (flying && actions.pausePress) pause();
     else if (paused && actions.pausePress) resume();
 
+    if (paused) {
+      audio.props(0);
+      audio.engine(0);
+      audio.buzz(0);
+    }
+
     if (flying && !isGround && actions.weaponSlot !== null) {
       sim.setWeapon(WEAPON_ORDER[actions.weaponSlot]);
     }
@@ -589,18 +621,19 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     if (!paused) {
       if (flying && isGround) {
         fpvRig.visible = false;
-        ground.tick(dt, actions, mouse);
-        ground.chaseCam(camera, dt, st.shake ? ground.player.locked ? 0.45 : 0 : 0);
+        ground.tick(dt, actions, mouse, st.invertY);
+        ground.chaseCam(camera, dt, st.shake ? (ground.player.locked ? 0.45 : 0) : 0);
         sim.tick(dt, actions, { dx: 0, dy: 0 }, st.invertY, false, camera, false);
-        audio.props(0.2 + ground.player.detect * 0.5);
-        const focus = ground.player.pos;
-        sun.position.set(focus.x - 90, 110, focus.z - 70);
-        sun.target.position.copy(focus);
-        sun.target.updateMatrixWorld();
+        const jeep = st.unit === "jeep";
+        audio.props(0);
+        audio.engine(jeep ? 0.25 + ground.getSpeed() / 22 : 0);
+        audio.buzz(ground.player.detect);
+        followSun(ground.player.pos.x, ground.player.pos.z);
         handleGroundEvents();
       } else if (flying) {
-        if (camera.fov !== 88) {
-          camera.fov = 88;
+        const wantFov = 84 + Math.min(1, sim.getSpeed() / 38) * 12;
+        if (Math.abs(camera.fov - wantFov) > 0.4) {
+          camera.fov = wantFov;
           camera.updateProjectionMatrix();
         }
         sim.tick(dt, actions, mouse, st.invertY, true, camera, st.shake);
@@ -618,18 +651,20 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
           }
         }
         audio.props(sim.drone.throttle);
+        audio.engine(0);
+        audio.buzz(0);
         fpvRig.visible = true;
         fpvRig.traverse((o) => {
           if (o.userData.prop) o.rotation.z += dt * (12 + sim.drone.throttle * 40);
         });
-        sun.position.set(sim.drone.pos.x - 90, 110, sim.drone.pos.z - 70);
-        sun.target.position.copy(sim.drone.pos);
-        sun.target.updateMatrixWorld();
+        followSun(sim.drone.pos.x, sim.drone.pos.z);
       } else {
         fpvRig.visible = false;
         sim.tick(dt, actions, { dx: 0, dy: 0 }, st.invertY, false, camera, false);
         if (st.phase === "hangar") cinematic(dt);
         audio.props(st.phase === "hangar" ? 0.15 : 0);
+        audio.engine(0);
+        audio.buzz(0);
       }
     }
 
@@ -659,6 +694,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     };
   }
   bindProbe();
+  applyTod(useGameStore.getState().tod);
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && useGameStore.getState().phase === "flight") pause();

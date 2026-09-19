@@ -28,6 +28,7 @@ export function Hangar({ onStart, ready }: Props) {
   const invertY = useGameStore((s) => s.invertY);
   const muted = useGameStore((s) => s.muted);
   const shake = useGameStore((s) => s.shake);
+  const tod = useGameStore((s) => s.tod);
   const patch = useGameStore((s) => s.patch);
   const wpn = WEAPONS[weapon];
   const def = MODES[mode];
@@ -177,20 +178,91 @@ export function Hangar({ onStart, ready }: Props) {
             />
             Тряска камеры
           </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={tod === "night"}
+              onChange={(e) => patch({ tod: e.target.checked ? "night" : "day" })}
+              className="size-3.5 accent-hud"
+              suppressHydrationWarning
+            />
+            Ночь
+          </label>
         </div>
 
-        <p className="mt-3 hidden text-[11px] leading-relaxed text-subtle coarse:hidden md:block">
-          {ground
-            ? "W — вперёд · A/D — поворот · пробел — бег · Ctrl — присесть · красная лента — фронт"
-            : arcade
-              ? "W — вперёд · A/D — рысканье · ЛКМ — огонь · X — камикадзе · не дайте пересечь ленту"
-              : "W — вперёд · A/D — рысканье · мышь — взгляд · X — подрыв · пауза — ангар"}
-        </p>
-        <p className="mt-3 hidden text-[11px] leading-relaxed text-subtle coarse:block">
-          {ground
-            ? "Левый стик — ход и поворот. Бег / присесть справа."
-            : "Левый стик — полёт, правый — крен. Огонь и подрыв справа."}
-        </p>
+        <div className="mt-4 rounded-md border border-border bg-bg px-3 py-2.5 short:mt-3">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-hud-dim">Управление и движение</div>
+          {ground ? (
+            <>
+              <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] leading-snug text-muted">
+                <li>
+                  <span className="text-fg">W / S</span> — ход
+                </li>
+                <li>
+                  <span className="text-fg">A / D</span> — поворот
+                </li>
+                <li>
+                  <span className="text-fg">Мышь</span> — камера вокруг
+                </li>
+                <li>
+                  <span className="text-fg">Пробел</span> — {unit === "jeep" ? "газ" : "бег"}
+                </li>
+                {unit === "soldier" ? (
+                  <li>
+                    <span className="text-fg">Ctrl</span> — присесть
+                  </li>
+                ) : (
+                  <li>
+                    <span className="text-fg">S</span> — назад
+                  </li>
+                )}
+                <li>
+                  <span className="text-fg">P</span> — пауза
+                </li>
+              </ul>
+              <p className="mt-2 text-[11px] leading-snug text-subtle coarse:hidden">
+                Вид сзади. Хутор и сад слева, пшеница и кукуруза по грунтовке, подсолнухи, тополя, живые изгороди,
+                пруд с камышом. Грунтовка быстрее пашни — прячьтесь в рощах и кукурузе. Зелёный круг — выход на
+                красную ленту. Ночью горят окна, у пикапа фары.
+              </p>
+              <p className="mt-2 hidden text-[11px] leading-snug text-subtle coarse:block">
+                Левый стик — ход и поворот, правый — камера. Бег / присесть справа. Прячьтесь в рощах.
+              </p>
+            </>
+          ) : (
+            <>
+              <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] leading-snug text-muted coarse:hidden">
+                <li>
+                  <span className="text-fg">W</span> — вперёд
+                </li>
+                <li>
+                  <span className="text-fg">A / D</span> — рысканье
+                </li>
+                <li>
+                  <span className="text-fg">Мышь</span> — взгляд
+                </li>
+                <li>
+                  <span className="text-fg">Пробел</span> — набор
+                </li>
+                <li>
+                  <span className="text-fg">ЛКМ</span> — огонь
+                </li>
+                <li>
+                  <span className="text-fg">X</span> — подрыв
+                </li>
+              </ul>
+              <p className="mt-2 hidden text-[11px] leading-snug text-subtle coarse:block">
+                Левый стик — полёт, правый — крен. Огонь и подрыв справа.
+              </p>
+              <p className="mt-2 hidden text-[11px] leading-snug text-subtle coarse:hidden md:block">
+                {arcade
+                  ? "Не дайте пехоте пересечь красную ленту. Три волны, три прорыва — и линия падёт."
+                  : "Полигон: пшеница, кукуруза, подсолнухи, рощи, тополя, пруд, река и карьер. Сядьте на площадку или ударьте цель. Ночь — в ангаре."}
+              </p>
+            </>
+          )}
+        </div>
+
         </div>
       </div>
     </div>

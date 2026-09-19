@@ -188,3 +188,29 @@ export const GROUND_START = { x: -14, z: 38 };
 /** Assault: reach the front line, not the far rear. */
 export const ASSAULT_GOAL = { x: 18, z: -40, r: 12 };
 export const EXTRACTION = ASSAULT_GOAL;
+
+export const ROAD_PATHS: Array<Array<[number, number]>> = [
+  [
+    [-48, 58],
+    [-28, 46],
+    [-16, 40],
+    [-10, 28],
+    [-2, 16],
+    [4, 4],
+    [10, -10],
+    [14, -24],
+    [18, -40],
+    [24, -56],
+  ],
+  [
+    [-10, 28],
+    [6, 18],
+    [20, 10],
+    [36, 4],
+  ],
+  [
+    [4, 4],
+    [-8, -2],
+    [-22, 8],
+  ],
+];

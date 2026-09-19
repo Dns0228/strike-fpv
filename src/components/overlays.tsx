@@ -18,6 +18,7 @@ export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
   const lives = useGameStore((s) => s.lives);
   const invertY = useGameStore((s) => s.invertY);
   const muted = useGameStore((s) => s.muted);
+  const tod = useGameStore((s) => s.tod);
   const wave = useGameStore((s) => s.wave);
   const breaches = useGameStore((s) => s.breaches);
   const patch = useGameStore((s) => s.patch);
@@ -98,6 +99,17 @@ export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
               className="size-3.5 accent-hud"
             />
             Без звука
+          </label>
+        ) : null}
+        {paused ? (
+          <label className="mt-2 flex items-center gap-2 text-xs text-subtle">
+            <input
+              type="checkbox"
+              checked={tod === "night"}
+              onChange={(e) => patch({ tod: e.target.checked ? "night" : "day" })}
+              className="size-3.5 accent-hud"
+            />
+            Ночь
           </label>
         ) : null}
 

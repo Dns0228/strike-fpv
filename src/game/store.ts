@@ -70,6 +70,7 @@ export type GameHud = {
   invertY: boolean;
   shake: boolean;
   muted: boolean;
+  tod: "day" | "night";
   blips: RadarBlip[];
   droneX: number;
   droneZ: number;
@@ -105,6 +106,7 @@ function persistSettings() {
       shake: st.shake,
       mode: st.mode,
       unit: st.unit,
+      tod: st.tod,
     }),
   );
 }
@@ -120,6 +122,7 @@ export function loadSettings(): void {
       shake?: boolean;
       mode?: GameMode;
       unit?: GroundUnit;
+      tod?: "day" | "night";
     };
     useGameStore.getState().patch({
       invertY: !!s.invertY,
@@ -127,6 +130,7 @@ export function loadSettings(): void {
       shake: s.shake !== false,
       mode: parseMode(s.mode),
       unit: s.unit === "jeep" ? "jeep" : "soldier",
+      tod: s.tod === "night" ? "night" : "day",
     });
   } catch {
     /* ignore */
@@ -156,6 +160,7 @@ export const useGameStore = create<GameHud>((set) => ({
   invertY: false,
   shake: true,
   muted: false,
+  tod: "day",
   blips: [],
   droneX: 0,
   droneZ: 0,
@@ -176,7 +181,8 @@ export const useGameStore = create<GameHud>((set) => ({
       "muted" in partial ||
       "shake" in partial ||
       "mode" in partial ||
-      "unit" in partial
+      "unit" in partial ||
+      "tod" in partial
     ) {
       persistSettings();
     }

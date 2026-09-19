@@ -1,4 +1,4 @@
-import { ARMOR_LABEL, FRONT_Z, WEAPONS, WEAPON_ORDER, type WeaponId } from "@/game/catalog";
+import { ARMOR_LABEL, FRONT_Z, ROAD_PATHS, WEAPONS, WEAPON_ORDER, type WeaponId } from "@/game/catalog";
 import { isGroundSeat, MODES } from "@/game/modes";
 import { useGameStore, type RadarBlip } from "@/game/store";
 
@@ -34,6 +34,7 @@ function GroundHud() {
   const hitFlash = useGameStore((s) => s.hitFlash);
   const message = useGameStore((s) => s.message);
   const unit = useGameStore((s) => s.unit);
+  const tod = useGameStore((s) => s.tod);
   const yaw = (-heading * Math.PI) / 180;
   const tone = locked ? "text-danger" : detect > 0.45 ? "text-warn" : "text-ok";
   const status = locked ? "ЗАХВАТ FPV" : detect > 0.45 ? "В ЗОНЕ" : conceal > 0.5 ? "УКРЫТИЕ" : "ТИШИНА";
@@ -44,7 +45,7 @@ function GroundHud() {
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse at center, transparent 52%, color-mix(in oklab, var(--color-bg) 50%, transparent) 100%)",
+            "radial-gradient(ellipse at center, transparent 68%, color-mix(in oklab, var(--color-bg) 22%, transparent) 100%)",
         }}
       />
       {hitFlash > 0.05 ? (
@@ -57,6 +58,7 @@ function GroundHud() {
             Штурм · {unit === "jeep" ? "пикап" : "солдат"}
           </div>
           <div className={`mt-1 text-xs tabular ${tone}`}>{status}</div>
+          <div className="mt-1 text-[10px] tracking-widest text-hud-dim uppercase">{tod === "night" ? "НОЧЬ" : "ДЕНЬ"}</div>
         </div>
         <div className="flex items-start gap-3">
           <button
@@ -96,6 +98,9 @@ function GroundHud() {
           />
         </div>
         {message ? <p className="text-[11px] tracking-wide text-muted">{message}</p> : null}
+        <p className="hidden text-[10px] tracking-wide text-subtle coarse:hidden md:block">
+          W ход · A/D поворот · мышь камера · пробел бег · Ctrl присесть
+        </p>
       </footer>
     </div>
   );
@@ -124,6 +129,7 @@ function FpvHud() {
   const waves = useGameStore((s) => s.waves);
   const breaches = useGameStore((s) => s.breaches);
   const breachMax = useGameStore((s) => s.breachMax);
+  const tod = useGameStore((s) => s.tod);
 
   const batTone = battery < 18 ? "text-danger" : battery < 40 ? "text-warn" : "text-hud";
   const yaw = (-heading * Math.PI) / 180;
@@ -161,6 +167,7 @@ function FpvHud() {
               : arcade
                 ? `ВОЛНА ${wave}/${waves} · ПРОРЫВ ${breaches}/${breachMax}`
                 : `ЦЕЛИ ${destroyed}/${total}`}
+            <span className="ml-2 text-hud-dim">{tod === "night" ? "НОЧЬ" : "ДЕНЬ"}</span>
           </div>
         </div>
         <div className="flex items-start gap-3">
@@ -326,8 +333,49 @@ function Minimap({
       {p0 && p1 ? (
         <svg className="absolute inset-0" width={size} height={size} aria-hidden>
           <line x1={p0.px} y1={p0.py} x2={p1.px} y2={p1.py} stroke="#c45c4a" strokeWidth="1.5" strokeDasharray="3 2" />
+          {ROAD_PATHS.map((path, pi) =>
+            path.slice(1).map((pt, i) => {
+              const a = project(path[i][0], path[i][1]);
+              const b = project(pt[0], pt[1]);
+              return (
+                <line
+                  key={`${pi}-${i}`}
+                  x1={a.px}
+                  y1={a.py}
+                  x2={b.px}
+                  y2={b.py}
+                  stroke="#8a6a42"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  opacity="0.7"
+                />
+              );
+            }),
+          )}
         </svg>
-      ) : null}
+      ) : (
+        <svg className="absolute inset-0" width={size} height={size} aria-hidden>
+          {ROAD_PATHS.map((path, pi) =>
+            path.slice(1).map((pt, i) => {
+              const a = project(path[i][0], path[i][1]);
+              const b = project(pt[0], pt[1]);
+              return (
+                <line
+                  key={`${pi}-${i}`}
+                  x1={a.px}
+                  y1={a.py}
+                  x2={b.px}
+                  y2={b.py}
+                  stroke="#8a6a42"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  opacity="0.7"
+                />
+              );
+            }),
+          )}
+        </svg>
+      )}
       <div className="absolute left-1/2 top-1 h-2 w-px -translate-x-1/2 bg-hud" />
       {blips.map((b) => {
         const dx = b.x - x;
