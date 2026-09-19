@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Armor, TargetKind, WeaponId } from "./catalog";
-import { WEAPONS } from "./catalog";
+import { SETTINGS_KEY, WEAPONS } from "./catalog";
 
 export type Phase = "hangar" | "flight" | "pause" | "dead" | "victory";
 
@@ -26,6 +26,14 @@ export type FloatText = {
   kind: "hit" | "kill" | "info";
 };
 
+export type RadarBlip = {
+  id: number;
+  x: number;
+  z: number;
+  armor: Armor;
+  alive: boolean;
+};
+
 export type GameHud = {
   phase: Phase;
   weapon: WeaponId;
@@ -46,6 +54,9 @@ export type GameHud = {
   invertY: boolean;
   shake: boolean;
   muted: boolean;
+  blips: RadarBlip[];
+  droneX: number;
+  droneZ: number;
   patch: (partial: Partial<Omit<GameHud, "patch">>) => void;
 };
 
@@ -55,6 +66,31 @@ function emptyAmmo(): Record<WeaponId, number> {
     he: WEAPONS.he.ammo,
     ap: WEAPONS.ap.ammo,
   };
+}
+
+function persistSettings() {
+  if (typeof localStorage === "undefined") return;
+  const st = useGameStore.getState();
+  localStorage.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({ invertY: st.invertY, muted: st.muted, shake: st.shake }),
+  );
+}
+
+export function loadSettings(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw) as { invertY?: boolean; muted?: boolean; shake?: boolean };
+    useGameStore.getState().patch({
+      invertY: !!s.invertY,
+      muted: !!s.muted,
+      shake: s.shake !== false,
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 export const useGameStore = create<GameHud>((set) => ({
@@ -77,7 +113,13 @@ export const useGameStore = create<GameHud>((set) => ({
   invertY: false,
   shake: true,
   muted: false,
-  patch: (partial) => set(partial),
+  blips: [],
+  droneX: 0,
+  droneZ: 0,
+  patch: (partial) => {
+    set(partial);
+    if ("invertY" in partial || "muted" in partial || "shake" in partial) persistSettings();
+  },
 }));
 
 export function refillAmmo(): Record<WeaponId, number> {

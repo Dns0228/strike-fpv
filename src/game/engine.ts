@@ -43,15 +43,15 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   renderer.shadowMap.enabled = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.18;
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(88, 1, 0.12, 700);
   scene.add(camera);
 
-  const hemi = new THREE.HemisphereLight(0xc9d2c6, 0x3a3d32, 0.85);
+  const hemi = new THREE.HemisphereLight(0xd8ead0, 0x3a4a32, 1.05);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xf0ead8, 1.35);
+  const sun = new THREE.DirectionalLight(0xfff1d6, 1.72);
   sun.position.set(-80, 120, -60);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
@@ -64,7 +64,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   scene.add(sun);
   scene.add(sun.target);
 
-  const fill = new THREE.DirectionalLight(0x8a9aa0, 0.25);
+  const fill = new THREE.DirectionalLight(0x9ab4bc, 0.38);
   fill.position.set(40, 20, 80);
   scene.add(fill);
 
@@ -226,6 +226,9 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       score: sim.score,
       destroyed: sim.destroyed,
       totalTargets: sim.total,
+      blips: sim.getBlips().slice(),
+      droneX: sim.drone.pos.x,
+      droneZ: sim.drone.pos.z,
       lock: lock
         ? {
             label: lock.label,
@@ -281,7 +284,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
           camera.fov = 88;
           camera.updateProjectionMatrix();
         }
-        sim.tick(dt, actions, mouse, st.invertY, true, camera);
+        sim.tick(dt, actions, mouse, st.invertY, true, camera, st.shake);
         audio.props(sim.drone.throttle);
         fpvRig.visible = true;
         fpvRig.traverse((o) => {
@@ -292,7 +295,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
         sun.target.updateMatrixWorld();
       } else {
         fpvRig.visible = false;
-        sim.tick(dt, actions, { dx: 0, dy: 0 }, st.invertY, false, camera);
+        sim.tick(dt, actions, { dx: 0, dy: 0 }, st.invertY, false, camera, false);
         if (st.phase === "hangar") cinematic(dt);
         audio.props(st.phase === "hangar" ? 0.15 : 0);
       }

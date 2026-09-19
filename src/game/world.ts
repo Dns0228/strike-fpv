@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { TARGETS, WORLD_SIZE, type TargetKind } from "./catalog";
+import { TARGETS, WORLD_SIZE, type Armor, type TargetKind } from "./catalog";
 import { fbm, hash2, lerp } from "./math";
 
 export type Spawn = {
@@ -19,6 +19,12 @@ export type WorldApi = {
 };
 
 const HALF = WORLD_SIZE * 0.5;
+
+const BEACON: Record<Armor, number> = {
+  soft: 0x8fb87a,
+  light: 0xc4a05a,
+  heavy: 0xc45c4a,
+};
 
 export function terrainHeight(x: number, z: number): number {
   const nx = x * 0.011;
@@ -56,11 +62,11 @@ function canvasTex(size: number, paint: (ctx: CanvasRenderingContext2D, size: nu
 
 function groundTexture(): THREE.CanvasTexture {
   return canvasTex(256, (ctx, s) => {
-    ctx.fillStyle = "#3a4630";
+    ctx.fillStyle = "#2c4a28";
     ctx.fillRect(0, 0, s, s);
-    for (let i = 0; i < 1400; i++) {
-      const g = 40 + Math.random() * 50;
-      ctx.fillStyle = `rgba(${g * 0.7},${g},${g * 0.45},${0.15 + Math.random() * 0.35})`;
+    for (let i = 0; i < 1600; i++) {
+      const g = 48 + Math.random() * 70;
+      ctx.fillStyle = `rgba(${g * 0.55},${g},${g * 0.38},${0.18 + Math.random() * 0.4})`;
       ctx.fillRect(Math.random() * s, Math.random() * s, 2 + Math.random() * 6, 2 + Math.random() * 4);
     }
   });
@@ -79,6 +85,7 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colors = new Float32Array(pos.count * 3);
   const col = new THREE.Color();
+  const ridge = new THREE.Color(0x6e8a62);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
@@ -86,13 +93,13 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
     pos.setY(i, y);
     const road = Math.abs(z + x * 0.08) < 7;
     const river = Math.abs(z - 70 - Math.sin(x * 0.02) * 16) < 11;
-    if (river) col.setRGB(0.22, 0.32, 0.3);
-    else if (road) col.setRGB(0.22, 0.21, 0.18);
+    if (river) col.setRGB(0.14, 0.36, 0.34);
+    else if (road) col.setRGB(0.28, 0.26, 0.2);
     else {
       const n = fbm(x * 0.03, z * 0.03);
-      col.setRGB(0.22 + n * 0.08, 0.28 + n * 0.1, 0.16 + n * 0.04);
-      if (y < 0.4) col.setRGB(0.3, 0.28, 0.2);
-      if (y > 10) col.lerp(new THREE.Color(0x6a6e62), 0.35);
+      col.setRGB(0.16 + n * 0.1, 0.34 + n * 0.18, 0.12 + n * 0.05);
+      if (y < 0.4) col.setRGB(0.26, 0.34, 0.16);
+      if (y > 10) col.lerp(ridge, 0.35);
     }
     colors[i * 3] = col.r;
     colors[i * 3 + 1] = col.g;
@@ -121,9 +128,9 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
   }
   riverGeo.computeVertexNormals();
   const riverMat = new THREE.MeshLambertMaterial({
-    color: 0x3d5a58,
+    color: 0x2f6a66,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.78,
   });
   const river = new THREE.Mesh(riverGeo, riverMat);
   group.add(river);
@@ -132,9 +139,10 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
   const skyGeo = new THREE.SphereGeometry(520, 24, 16);
   const skyCol = new Float32Array(skyGeo.attributes.position.count * 3);
   const skyC = new THREE.Color();
+  const zenith = new THREE.Color(0x7eb4d0);
   for (let i = 0; i < skyGeo.attributes.position.count; i++) {
     const y = skyGeo.attributes.position.getY(i) / 520;
-    skyC.setRGB(0.42, 0.44, 0.36).lerp(new THREE.Color(0.55, 0.64, 0.68), Math.max(0, y));
+    skyC.setRGB(0.42, 0.56, 0.58).lerp(zenith, Math.max(0, y));
     skyCol[i * 3] = skyC.r;
     skyCol[i * 3 + 1] = skyC.g;
     skyCol[i * 3 + 2] = skyC.b;
@@ -149,18 +157,18 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
   group.add(new THREE.Mesh(skyGeo, skyMat));
   track(skyGeo, skyMat);
 
-  const sunGeo = new THREE.CircleGeometry(18, 24);
-  const sunMat = new THREE.MeshBasicMaterial({ color: 0xf2ead0, fog: false });
+  const sunGeo = new THREE.CircleGeometry(22, 24);
+  const sunMat = new THREE.MeshBasicMaterial({ color: 0xfff4d4, fog: false });
   const sun = new THREE.Mesh(sunGeo, sunMat);
-  sun.position.set(-180, 90, -220);
+  sun.position.set(-180, 110, -220);
   sun.lookAt(0, 0, 0);
   group.add(sun);
   track(sunGeo, sunMat);
 
   const trunkGeo = new THREE.CylinderGeometry(0.18, 0.28, 2.2, 5);
   const crownGeo = new THREE.ConeGeometry(1.6, 4.2, 6);
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x3a3228 });
-  const crownMat = new THREE.MeshLambertMaterial({ color: 0x3f5234 });
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3828 });
+  const crownMat = new THREE.MeshLambertMaterial({ color: 0x3a6a32 });
   const treeCount = 220;
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
   const crowns = new THREE.InstancedMesh(crownGeo, crownMat, treeCount);
@@ -279,8 +287,8 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
     { kind: "sam", x: 110, z: -12, yaw: 0.6 },
   ];
 
-  scene.fog = new THREE.Fog(0x9aa394, 90, 320);
-  scene.background = new THREE.Color(0x9aa394);
+  scene.fog = new THREE.Fog(0x87a898, 120, 420);
+  scene.background = new THREE.Color(0x87a898);
 
   return {
     group,
@@ -295,6 +303,9 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
     },
   };
 }
+
+const beaconShaft = new THREE.CylinderGeometry(0.055, 0.12, 14, 5);
+const beaconCap = new THREE.SphereGeometry(0.26, 8, 8);
 
 export function createTargetMesh(kind: TargetKind): THREE.Group {
   const g = new THREE.Group();
@@ -363,6 +374,22 @@ export function createTargetMesh(kind: TargetKind): THREE.Group {
       add(m, x, 2.1, 0.9);
     }
   }
+
+  const beaconMat = new THREE.MeshBasicMaterial({
+    color: BEACON[def.armor],
+    transparent: true,
+    opacity: 0.4,
+    depthWrite: false,
+    fog: false,
+  });
+  const shaft = new THREE.Mesh(beaconShaft, beaconMat);
+  shaft.position.y = def.height + 7.2;
+  shaft.userData.beacon = true;
+  g.add(shaft);
+  const cap = new THREE.Mesh(beaconCap, beaconMat);
+  cap.position.y = def.height + 0.35;
+  cap.userData.beacon = true;
+  g.add(cap);
 
   g.userData.height = def.height;
   return g;

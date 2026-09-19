@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { GameHandle } from "@/game/engine";
-import { useGameStore } from "@/game/store";
+import { loadSettings, useGameStore } from "@/game/store";
 import { Hangar } from "@/components/hangar";
 import { Hud } from "@/components/hud";
 import { Overlays } from "@/components/overlays";
@@ -12,6 +12,7 @@ export function FlightApp() {
   const phase = useGameStore((s) => s.phase);
 
   useEffect(() => {
+    loadSettings();
     const canvas = canvasRef.current;
     if (!canvas) return;
     let alive = true;

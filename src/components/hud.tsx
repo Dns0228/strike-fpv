@@ -1,5 +1,16 @@
 import { ARMOR_LABEL, WEAPONS, WEAPON_ORDER, type WeaponId } from "@/game/catalog";
-import { useGameStore } from "@/game/store";
+import { useGameStore, type RadarBlip } from "@/game/store";
+
+const CARDINALS: { deg: number; label: string }[] = [
+  { deg: 0, label: "С" },
+  { deg: 45, label: "45" },
+  { deg: 90, label: "В" },
+  { deg: 135, label: "135" },
+  { deg: 180, label: "Ю" },
+  { deg: 225, label: "225" },
+  { deg: 270, label: "З" },
+  { deg: 315, label: "315" },
+];
 
 export function Hud() {
   const speed = useGameStore((s) => s.speed);
@@ -16,8 +27,12 @@ export function Hud() {
   const floats = useGameStore((s) => s.floats);
   const hitFlash = useGameStore((s) => s.hitFlash);
   const message = useGameStore((s) => s.message);
+  const blips = useGameStore((s) => s.blips);
+  const droneX = useGameStore((s) => s.droneX);
+  const droneZ = useGameStore((s) => s.droneZ);
 
   const batTone = battery < 18 ? "text-danger" : battery < 40 ? "text-warn" : "text-hud";
+  const yaw = (-heading * Math.PI) / 180;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-mono text-hud">
@@ -62,6 +77,8 @@ export function Hud() {
         </div>
       </header>
 
+      <Compass heading={heading} />
+
       <div className="absolute left-3 top-1/3 space-y-3 text-[11px] tabular md:left-5">
         <Readout k="SPD" v={`${speed.toFixed(0)}`} u="м/с" />
         <Readout k="ALT" v={`${altitude.toFixed(0)}`} u="м" />
@@ -72,6 +89,8 @@ export function Hud() {
         <Readout k="АКБ" v={`${battery.toFixed(0)}`} u="%" tone={batTone} />
         <Readout k="БОРТ" v={`${lives}`} u="/ 3" />
       </div>
+
+      <Minimap blips={blips} x={droneX} z={droneZ} yaw={yaw} />
 
       {lock ? (
         <div
@@ -131,6 +150,89 @@ export function Hud() {
           })}
         </div>
       </footer>
+    </div>
+  );
+}
+
+function Compass({ heading }: { heading: number }) {
+  return (
+    <div className="absolute left-1/2 top-14 w-52 -translate-x-1/2 overflow-hidden md:top-16 md:w-72">
+      <div className="relative h-7 border-b border-hud/35">
+        {CARDINALS.map((m) => {
+          const d = ((m.deg - heading + 540) % 360) - 180;
+          const x = 50 + d * 0.72;
+          if (x < 6 || x > 94) return null;
+          const major = m.label.length === 1;
+          return (
+            <div
+              key={m.deg}
+              className="absolute top-0 -translate-x-1/2 text-center"
+              style={{ left: `${x}%` }}
+            >
+              <div className={`mx-auto w-px ${major ? "h-2 bg-hud" : "h-1.5 bg-hud/50"}`} />
+              <div className={`font-mono ${major ? "text-[10px] text-fg" : "text-[8px] text-hud-dim"}`}>
+                {m.label}
+              </div>
+            </div>
+          );
+        })}
+        <div className="absolute left-1/2 top-0 h-2.5 w-px -translate-x-1/2 bg-fg" />
+      </div>
+    </div>
+  );
+}
+
+function Minimap({
+  blips,
+  x,
+  z,
+  yaw,
+}: {
+  blips: RadarBlip[];
+  x: number;
+  z: number;
+  yaw: number;
+}) {
+  const size = 104;
+  const scale = size / 260;
+  const half = size / 2;
+  const maxR = half - 6;
+  const cy = Math.cos(yaw);
+  const sy = Math.sin(yaw);
+
+  return (
+    <div
+      className="absolute bottom-40 left-3 overflow-hidden rounded-sm border border-hud/40 bg-bg/75 md:bottom-8 md:left-5"
+      style={{ width: size, height: size }}
+    >
+      <div className="absolute inset-0 opacity-40">
+        <div className="absolute left-1/2 top-0 h-full w-px bg-hud/30" />
+        <div className="absolute left-0 top-1/2 h-px w-full bg-hud/30" />
+      </div>
+      <div className="absolute left-1/2 top-1 h-2 w-px -translate-x-1/2 bg-hud" />
+      {blips.map((b) => {
+        const dx = b.x - x;
+        const dz = b.z - z;
+        let lx = dx * cy + dz * -sy;
+        let lz = dx * -sy + dz * -cy;
+        const r = Math.hypot(lx, lz) * scale;
+        if (r > maxR && r > 0.001) {
+          const k = maxR / r;
+          lx *= k;
+          lz *= k;
+        }
+        const px = half + lx * scale;
+        const py = half - lz * scale;
+        const tone = !b.alive ? "bg-subtle" : b.armor === "heavy" ? "bg-danger" : b.armor === "light" ? "bg-warn" : "bg-ok";
+        return (
+          <span
+            key={b.id}
+            className={`absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${tone}`}
+            style={{ left: px, top: py, opacity: b.alive ? 1 : 0.45 }}
+          />
+        );
+      })}
+      <span className="absolute left-1/2 top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-fg bg-fg" />
     </div>
   );
 }
