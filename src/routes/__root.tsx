@@ -18,7 +18,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#0c0d0b" },
       {
         name: "description",
-        content: "FPV-удар 2.0: полёт от первого лица и цели с разным уроном.",
+        content: "FPV-удар 2.0: свободный полёт, оборона линии и штурм. Горизонтальный режим на телефоне.",
       },
     ],
     links: [

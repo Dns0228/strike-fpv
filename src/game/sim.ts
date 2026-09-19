@@ -15,6 +15,7 @@ import {
 } from "./catalog";
 import { clamp, expDamp } from "./math";
 import type { Actions } from "./input";
+import type { KillcamSpec } from "./replay";
 import type { RadarBlip } from "./store";
 import type { WorldApi } from "./world";
 import { createTargetMesh } from "./world";
@@ -44,6 +45,8 @@ export type Target = {
   flash: number;
   wreckTilt: number;
   smokeAcc: number;
+  holdWreck: boolean;
+  live: boolean;
 };
 
 export type DroneState = {
@@ -63,6 +66,7 @@ export type CombatEvent =
   | { type: "hit"; damage: number; kill: boolean; label: string; x: number; y: number; z: number }
   | { type: "explode"; x: number; y: number; z: number; size: number }
   | { type: "crash"; kamikaze: boolean }
+  | { type: "killcam"; spec: KillcamSpec }
   | { type: "lock" };
 
 const _fwd = new THREE.Vector3();
@@ -85,6 +89,17 @@ const YAW_RATE = 1.85;
 const FIXED = 1 / 60;
 const FWD_THRUST = 22;
 const NOSE_DOWN = 0.16;
+
+const DEBRIS_TINT: Record<TargetKind, number> = {
+  infantry: 1,
+  jeep: 0,
+  truck: 0,
+  ifv: 0,
+  radar: 3,
+  bunker: 4,
+  fuel: 2,
+  sam: 0,
+};
 
 export function createSim(scene: THREE.Scene, world: WorldApi) {
   const droneBodyGroup = new THREE.Group();
@@ -127,6 +142,8 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       flash: 0,
       wreckTilt: 0,
       smokeAcc: 0,
+      holdWreck: false,
+      live: false,
     });
   }
 
@@ -185,6 +202,70 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     smokes.push({ mesh, vel: new THREE.Vector3(), life: 0, max: 1 });
   }
 
+  const debrisGeos = [
+    new THREE.BoxGeometry(0.46, 0.1, 0.58),
+    new THREE.TetrahedronGeometry(0.3),
+    new THREE.BoxGeometry(0.24, 0.24, 0.24),
+    new THREE.CylinderGeometry(0.14, 0.16, 0.24, 5),
+  ];
+  const debrisMats = [
+    new THREE.MeshLambertMaterial({ color: 0x4c5538 }),
+    new THREE.MeshLambertMaterial({ color: 0x2c2e28 }),
+    new THREE.MeshLambertMaterial({ color: 0x6a4e3a }),
+    new THREE.MeshLambertMaterial({ color: 0x5c615a }),
+    new THREE.MeshLambertMaterial({ color: 0x6b6754 }),
+  ];
+  const debris: Array<{
+    mesh: THREE.Mesh;
+    vel: THREE.Vector3;
+    spin: THREE.Vector3;
+    life: number;
+  }> = [];
+  for (let i = 0; i < 64; i++) {
+    const mesh = new THREE.Mesh(debrisGeos[i % debrisGeos.length], debrisMats[i % debrisMats.length]);
+    mesh.visible = false;
+    mesh.castShadow = true;
+    scene.add(mesh);
+    debris.push({ mesh, vel: new THREE.Vector3(), spin: new THREE.Vector3(), life: 0 });
+  }
+
+  const fireGeo = new THREE.SphereGeometry(1, 12, 10);
+  const fireCols = [0xfff1c2, 0xe08932, 0x5a2414];
+  const fires: Array<{ mesh: THREE.Mesh; life: number; max: number; grow: number }> = [];
+  for (let i = 0; i < 9; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: fireCols[i % 3],
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(fireGeo, mat);
+    mesh.visible = false;
+    scene.add(mesh);
+    fires.push({ mesh, life: 0, max: 1, grow: 4 });
+  }
+
+  const waveGeo = new THREE.RingGeometry(0.55, 0.85, 28);
+  waveGeo.rotateX(-Math.PI / 2);
+  const waves: Array<{ mesh: THREE.Mesh; life: number; max: number }> = [];
+  for (let i = 0; i < 4; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xd2c4a0,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(waveGeo, mat);
+    mesh.visible = false;
+    scene.add(mesh);
+    waves.push({ mesh, life: 0, max: 1 });
+  }
+
+  const flashLight = new THREE.PointLight(0xffc27a, 0, 52, 2);
+  scene.add(flashLight);
+
   let weapon: WeaponId = "he";
   const ammo: Record<WeaponId, number> = {
     frag: WEAPONS.frag.ammo,
@@ -202,6 +283,11 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
   let hitstop = 0;
   let simTime = 0;
   const blips: RadarBlip[] = [];
+  let impactCommitted = true;
+  let pendingImpact: { x: number; y: number; z: number; power: number } | null = null;
+  let inboundScratch = new THREE.Vector3();
+  let drainMul = 1;
+  let mortal = true;
 
   function drainEvents(): CombatEvent[] {
     const out = events.splice(0, events.length);
@@ -220,10 +306,10 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     let used = 0;
     for (const p of particles) {
       if (p.life > 0) continue;
-      p.life = 0.35 + Math.random() * 0.4;
+      p.life = 0.4 + Math.random() * 0.5;
       p.mesh.visible = true;
       p.mesh.position.set(x, y, z);
-      p.vel.set((Math.random() - 0.5) * power, Math.random() * power * 0.7, (Math.random() - 0.5) * power);
+      p.vel.set((Math.random() - 0.5) * power, Math.random() * power * 0.85, (Math.random() - 0.5) * power);
       used++;
       if (used >= n) break;
     }
@@ -243,6 +329,63 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       mat.opacity = 0.38;
       used++;
       if (used >= n) break;
+    }
+  }
+
+  function spawnDebris(t: Target, n: number, power: number, dir: THREE.Vector3) {
+    const tint = DEBRIS_TINT[t.kind];
+    let used = 0;
+    for (let i = 0; i < debris.length && used < n; i++) {
+      const p = debris[(i * 7 + t.id) % debris.length];
+      if (p.life > 0) continue;
+      p.life = 1.6 + Math.random() * 1.4;
+      p.mesh.visible = true;
+      p.mesh.material = debrisMats[(tint + used) % debrisMats.length];
+      p.mesh.position.set(
+        t.pos.x + (Math.random() - 0.5) * t.radius,
+        t.pos.y + Math.random() * 1.4,
+        t.pos.z + (Math.random() - 0.5) * t.radius,
+      );
+      p.vel.set(
+        (Math.random() - 0.5) * power + dir.x * (4 + Math.random() * 6),
+        6 + Math.random() * power * 0.55,
+        (Math.random() - 0.5) * power + dir.z * (4 + Math.random() * 6),
+      );
+      p.spin.set((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8);
+      p.mesh.scale.setScalar(0.7 + Math.random() * 1.1);
+      p.mesh.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+      used++;
+    }
+  }
+
+  function spawnFireball(x: number, y: number, z: number, power: number) {
+    let used = 0;
+    for (const f of fires) {
+      if (f.life > 0) continue;
+      f.max = 0.45 + used * 0.18;
+      f.life = f.max;
+      f.grow = 3.2 + used * 2.4 + power * 1.6;
+      f.mesh.visible = true;
+      f.mesh.position.set(x, y + 0.5, z);
+      f.mesh.scale.setScalar(0.4);
+      const mat = f.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.95 - used * 0.18;
+      used++;
+      if (used >= 3) break;
+    }
+  }
+
+  function spawnWave(x: number, y: number, z: number) {
+    for (const w of waves) {
+      if (w.life > 0) continue;
+      w.max = 0.7;
+      w.life = w.max;
+      w.mesh.visible = true;
+      w.mesh.position.set(x, y, z);
+      w.mesh.scale.setScalar(0.4);
+      const mat = w.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.62;
+      break;
     }
   }
 
@@ -267,14 +410,20 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     t.flash = 0;
     t.smokeAcc = 0;
     t.wreckTilt = 0;
+    t.holdWreck = false;
     t.mesh.visible = true;
     t.mesh.scale.set(1, 1, 1);
     t.mesh.rotation.set(0, t.yaw, 0);
     setBeacons(t, true);
+    t.mesh.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshLambertMaterial) {
+        o.material.emissive.setHex(0x000000);
+      }
+    });
   }
 
-  function applyDamage(t: Target, amount: number, src: THREE.Vector3) {
-    if (!t.alive) return;
+  function applyDamage(t: Target, amount: number, src: THREE.Vector3, hold: boolean) {
+    if (!t.alive) return 0;
     t.hp -= amount;
     t.flash = 0.18;
     const kill = t.hp <= 0;
@@ -283,9 +432,12 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       t.hp = 0;
       destroyed += 1;
       score += t.score;
-      wreckTarget(t);
-      spawnBurst(t.pos.x, t.pos.y + 0.8, t.pos.z, 14, 18);
-      events.push({ type: "explode", x: t.pos.x, y: t.pos.y, z: t.pos.z, size: 1.2 });
+      if (hold) t.holdWreck = true;
+      else {
+        wreckTarget(t);
+        spawnBurst(t.pos.x, t.pos.y + 0.8, t.pos.z, 14, 18);
+        events.push({ type: "explode", x: t.pos.x, y: t.pos.y, z: t.pos.z, size: 1.2 });
+      }
     }
     events.push({
       type: "hit",
@@ -296,21 +448,98 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       y: src.y,
       z: src.z,
     });
+    return amount;
   }
 
-  function splashAt(x: number, y: number, z: number, weaponId: WeaponId | "kami") {
+  function splashAt(
+    x: number,
+    y: number,
+    z: number,
+    weaponId: WeaponId | "kami",
+    hold: boolean,
+    skipId: number | null,
+  ) {
     const def =
       weaponId === "kami"
         ? { splash: KAMIKAZE.splash, base: KAMIKAZE.baseDamage, vs: KAMIKAZE.vs }
         : { splash: WEAPONS[weaponId].splash, base: WEAPONS[weaponId].baseDamage, vs: WEAPONS[weaponId].vs };
+    const killed: Target[] = [];
+    let primaryDmg = 0;
     for (const t of targets) {
+      if (!t.alive && !t.holdWreck) continue;
+      if (skipId !== null && t.id === skipId) continue;
       if (!t.alive) continue;
       const d = Math.hypot(t.pos.x - x, t.pos.y - y, t.pos.z - z);
       if (d > def.splash + t.radius) continue;
       const fall = 1 - d / (def.splash + t.radius);
       const dmg = def.base * def.vs[t.armor] * (0.45 + 0.55 * fall);
-      applyDamage(t, dmg, t.pos);
+      applyDamage(t, dmg, t.pos, hold);
+      if (!t.alive) killed.push(t);
+      if (primaryDmg === 0) primaryDmg = dmg;
     }
+    return killed;
+  }
+
+  function emitKillcam(
+    t: Target,
+    damage: number,
+    dir: THREE.Vector3,
+    weaponId: WeaponId | "kami",
+    kamikaze: boolean,
+    secondary: number,
+  ) {
+    impactCommitted = false;
+    pendingImpact = { x: t.pos.x, y: t.pos.y + 0.6, z: t.pos.z, power: kamikaze ? 1.6 : 1.15 };
+    inboundScratch.copy(dir);
+    if (inboundScratch.lengthSq() < 0.0001) inboundScratch.set(0, 0, -1);
+    inboundScratch.normalize();
+    events.push({
+      type: "killcam",
+      spec: {
+        x: t.pos.x,
+        y: t.pos.y + 0.4,
+        z: t.pos.z,
+        ix: inboundScratch.x,
+        iy: inboundScratch.y,
+        iz: inboundScratch.z,
+        damage: Math.round(damage),
+        kill: true,
+        label: t.label,
+        armor: t.armor,
+        kind: t.kind,
+        hp: 0,
+        maxHp: t.maxHp,
+        weapon: weaponId,
+        kamikaze,
+        secondary,
+        groundY: world.heightAt(t.pos.x, t.pos.z),
+      },
+    });
+  }
+
+  function commitImpact() {
+    if (impactCommitted) return;
+    impactCommitted = true;
+    const hit = pendingImpact;
+    pendingImpact = null;
+    const x = hit?.x ?? drone.pos.x;
+    const y = hit?.y ?? drone.pos.y;
+    const z = hit?.z ?? drone.pos.z;
+    const power = hit?.power ?? 1;
+    flashLight.position.set(x, y + 1.1, z);
+    flashLight.intensity = 42 * power;
+    spawnFireball(x, y, z, power);
+    spawnWave(x, world.heightAt(x, z) + 0.14, z);
+    spawnBurst(x, y + 0.4, z, 18, 20 * power);
+    spawnSmoke(x, y, z, 12);
+    for (const t of targets) {
+      if (!t.holdWreck) continue;
+      t.holdWreck = false;
+      wreckTarget(t);
+      spawnDebris(t, 16, 16 * power, inboundScratch);
+    }
+    events.push({ type: "explode", x, y, z, size: 1.5 * power });
+    trauma = Math.min(1, trauma + 0.85);
   }
 
   function orientRocket(p: Projectile) {
@@ -343,11 +572,10 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     trauma = Math.min(1, trauma + 0.18);
   }
 
-  function crash(kamikaze: boolean) {
-    if (!drone.alive) return;
-    drone.alive = false;
+  function presentCrash(kamikaze: boolean) {
     spawnBurst(drone.pos.x, drone.pos.y, drone.pos.z, 20, kamikaze ? 28 : 14);
     spawnSmoke(drone.pos.x, drone.pos.y, drone.pos.z, 6);
+    spawnFireball(drone.pos.x, drone.pos.y, drone.pos.z, kamikaze ? 1.4 : 0.8);
     events.push({
       type: "explode",
       x: drone.pos.x,
@@ -355,10 +583,34 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       z: drone.pos.z,
       size: kamikaze ? 2 : 1,
     });
-    if (kamikaze) splashAt(drone.pos.x, drone.pos.y, drone.pos.z, "kami");
-    events.push({ type: "crash", kamikaze });
+  }
+
+  function crash(kamikaze: boolean) {
+    if (!drone.alive) return;
+    drone.alive = false;
+    if (mortal) lives = Math.max(0, lives - 1);
     trauma = 1;
-    lives = Math.max(0, lives - 1);
+    events.push({ type: "crash", kamikaze });
+
+    if (kamikaze) {
+      basis();
+      inboundScratch.copy(drone.vel.lengthSq() > 4 ? drone.vel : _fwd);
+      const nearby = targets
+        .filter((t) => t.alive && t.pos.distanceTo(drone.pos) < KAMIKAZE.splash + t.radius + 2)
+        .sort((a, b) => a.pos.distanceTo(drone.pos) - b.pos.distanceTo(drone.pos));
+      const primary = nearby[0] ?? null;
+      if (primary) {
+        const dmg = KAMIKAZE.baseDamage * KAMIKAZE.vs[primary.armor];
+        applyDamage(primary, dmg, primary.pos, true);
+        const extra = splashAt(drone.pos.x, drone.pos.y, drone.pos.z, "kami", true, primary.id);
+        emitKillcam(primary, dmg, inboundScratch, "kami", true, extra.length);
+      } else {
+        splashAt(drone.pos.x, drone.pos.y, drone.pos.z, "kami", false, null);
+        presentCrash(true);
+      }
+    } else {
+      presentCrash(false);
+    }
   }
 
   function respawn() {
@@ -451,7 +703,7 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     }
 
     drone.battery = clamp(
-      drone.battery - (0.5 + drone.throttle * 0.85 + (actions.boost ? 2.8 : 0)) * dt,
+      drone.battery - (0.5 + drone.throttle * 0.85 + (actions.boost ? 2.8 : 0)) * dt * drainMul,
       0,
       100,
     );
@@ -467,6 +719,7 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
 
     for (const t of targets) {
       if (t.alive) continue;
+      if (t.holdWreck) continue;
       t.smokeAcc += dt;
       if (t.smokeAcc > 0.28) {
         t.smokeAcc = 0;
@@ -490,32 +743,51 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       orientRocket(p);
       const ground = world.heightAt(p.pos.x, p.pos.z);
       let hit = p.pos.y < ground || p.life <= 0 || buildingHit(p.pos.x, p.pos.y, p.pos.z);
+      let primary: Target | null = null;
       if (!hit) {
         for (const t of targets) {
           if (!t.alive) continue;
           if (p.pos.distanceTo(t.pos) < t.radius + 0.4) {
-            const w = WEAPONS[p.weapon];
-            applyDamage(t, w.baseDamage * w.vs[t.armor], t.pos);
-            splashAt(p.pos.x, p.pos.y, p.pos.z, p.weapon);
+            primary = t;
             hit = true;
-            trauma = Math.min(1, trauma + 0.28);
-            hitstop = 0.045;
             break;
           }
         }
-      } else if (p.pos.y < ground + 0.5) {
-        splashAt(p.pos.x, ground, p.pos.z, p.weapon);
+      }
+      if (primary) {
+        const w = WEAPONS[p.weapon];
+        const dmg = w.baseDamage * w.vs[primary.armor];
+        const willKill = primary.hp - dmg <= 0;
+        applyDamage(primary, dmg, primary.pos, willKill);
+        const extra = splashAt(p.pos.x, p.pos.y, p.pos.z, p.weapon, willKill, primary.id);
+        const anyKill = !primary.alive || extra.length > 0;
+        if (anyKill) {
+          const focus = !primary.alive ? primary : extra[0];
+          const focusDmg = !primary.alive ? dmg : w.baseDamage * w.vs[focus.armor];
+          emitKillcam(focus, focusDmg, p.vel, p.weapon, false, extra.filter((t) => t !== focus).length);
+        } else {
+          spawnBurst(p.pos.x, p.pos.y, p.pos.z, 6, 8);
+        }
+        trauma = Math.min(1, trauma + 0.28);
+        hitstop = 0.045;
+      } else if (hit && p.pos.y < ground + 0.5) {
+        const extra = splashAt(p.pos.x, ground, p.pos.z, p.weapon, false, null);
+        spawnBurst(p.pos.x, p.pos.y, p.pos.z, 6, 8);
+        if (extra.length) {
+          emitKillcam(extra[0], WEAPONS[p.weapon].baseDamage * WEAPONS[p.weapon].vs[extra[0].armor], p.vel, p.weapon, false, extra.length - 1);
+        }
       }
       if (hit) {
         p.active = false;
         p.mesh.visible = false;
-        spawnBurst(p.pos.x, p.pos.y, p.pos.z, 6, 8);
       }
     }
   }
 
   function updateVisuals(dt: number, camera: THREE.Camera, shakeOn: boolean) {
     simTime += dt;
+    flashLight.intensity = Math.max(0, flashLight.intensity - dt * 70);
+
     for (const t of targets) {
       if (t.flash > 0) {
         t.flash -= dt;
@@ -557,6 +829,45 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       const mat = p.mesh.material as THREE.MeshBasicMaterial;
       mat.opacity = 0.36 * (1 - u);
       if (p.life <= 0) p.mesh.visible = false;
+    }
+    for (const p of debris) {
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      p.mesh.position.addScaledVector(p.vel, dt);
+      p.vel.multiplyScalar(Math.exp(-1.15 * dt));
+      p.vel.y -= 16 * dt;
+      p.mesh.rotation.x += p.spin.x * dt;
+      p.mesh.rotation.y += p.spin.y * dt;
+      p.mesh.rotation.z += p.spin.z * dt;
+      const gy = world.heightAt(p.mesh.position.x, p.mesh.position.z) + 0.12;
+      if (p.mesh.position.y < gy) {
+        p.mesh.position.y = gy;
+        p.vel.y *= -0.32;
+        p.vel.x *= 0.55;
+        p.vel.z *= 0.55;
+        p.spin.multiplyScalar(0.6);
+      }
+      if (p.life <= 0) p.mesh.visible = false;
+    }
+    for (const f of fires) {
+      if (f.life <= 0) continue;
+      f.life -= dt;
+      const u = 1 - f.life / f.max;
+      const s = 0.5 + u * f.grow;
+      f.mesh.scale.setScalar(s);
+      const mat = f.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = (1 - u) * 0.85;
+      f.mesh.position.y += dt * 1.8;
+      if (f.life <= 0) f.mesh.visible = false;
+    }
+    for (const w of waves) {
+      if (w.life <= 0) continue;
+      w.life -= dt;
+      const u = 1 - w.life / w.max;
+      w.mesh.scale.setScalar(0.6 + u * 18);
+      const mat = w.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.55 * (1 - u);
+      if (w.life <= 0) w.mesh.visible = false;
     }
 
     _euler.set(drone.pitch, drone.yaw, drone.roll, "YXZ");
@@ -611,6 +922,7 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
   function refreshBlips() {
     blips.length = 0;
     for (const t of targets) {
+      if (!t.alive && !t.live) continue;
       blips.push({ id: t.id, x: t.pos.x, z: t.pos.z, armor: t.armor, alive: t.alive });
     }
     return blips;
@@ -638,11 +950,91 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     updateVisuals(dt, camera, shakeOn);
   }
 
+  function hideProjectiles(hide: boolean) {
+    for (const p of pool) {
+      if (hide) p.mesh.visible = false;
+      else if (p.active) p.mesh.visible = true;
+    }
+  }
+
+  function spawnLive(kind: TargetKind, x: number, z: number, yaw: number): number {
+    const def = TARGETS[kind];
+    const mesh = createTargetMesh(kind);
+    const y = world.heightAt(x, z);
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = yaw;
+    scene.add(mesh);
+    const t: Target = {
+      id: idSeq++,
+      kind,
+      armor: def.armor,
+      hp: def.hp,
+      maxHp: def.hp,
+      label: def.label,
+      score: def.score,
+      radius: def.radius,
+      pos: new THREE.Vector3(x, y + def.height * 0.45, z),
+      yaw,
+      alive: true,
+      mesh,
+      flash: 0,
+      wreckTilt: 0,
+      smokeAcc: 0,
+      holdWreck: false,
+      live: true,
+    };
+    targets.push(t);
+    return t.id;
+  }
+
+  function clearLive() {
+    for (let i = targets.length - 1; i >= 0; i--) {
+      if (!targets[i].live) continue;
+      scene.remove(targets[i].mesh);
+      targets.splice(i, 1);
+    }
+  }
+
+  function syncLive(id: number, x: number, y: number, z: number, yaw: number) {
+    const t = targets.find((it) => it.id === id);
+    if (!t || !t.alive) return;
+    const def = TARGETS[t.kind];
+    t.pos.set(x, y + def.height * 0.45, z);
+    t.yaw = yaw;
+    t.mesh.position.set(x, y, z);
+    t.mesh.rotation.y = yaw + Math.PI;
+  }
+
+  function setStaticIdle(idle: boolean) {
+    for (const t of targets) {
+      if (t.live) continue;
+      if (idle) {
+        t.alive = false;
+        t.holdWreck = false;
+        t.mesh.visible = false;
+        setBeacons(t, false);
+      } else restoreTarget(t);
+    }
+  }
+
+  function getTarget(id: number) {
+    return targets.find((it) => it.id === id);
+  }
+
+  function setRules(opts: { mortal?: boolean; drainMul?: number }) {
+    if (opts.mortal !== undefined) mortal = opts.mortal;
+    if (opts.drainMul !== undefined) drainMul = opts.drainMul;
+  }
+
   function resetMatch() {
     lives = DRONE_LIVES;
     score = 0;
     destroyed = 0;
     weapon = "he";
+    impactCommitted = true;
+    pendingImpact = null;
+    flashLight.intensity = 0;
+    clearLive();
     for (const t of targets) restoreTarget(t);
     for (const p of pool) {
       p.active = false;
@@ -656,7 +1048,30 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       p.life = 0;
       p.mesh.visible = false;
     }
+    for (const p of debris) {
+      p.life = 0;
+      p.mesh.visible = false;
+    }
+    for (const f of fires) {
+      f.life = 0;
+      f.mesh.visible = false;
+    }
+    for (const w of waves) {
+      w.life = 0;
+      w.mesh.visible = false;
+    }
     respawn();
+  }
+
+  function debugKillcam(): KillcamSpec | null {
+    const t = targets.find((x) => x.alive);
+    if (!t) return null;
+    const dmg = t.maxHp;
+    applyDamage(t, dmg, t.pos, true);
+    inboundScratch.set(0.55, -0.12, -0.82).normalize();
+    emitKillcam(t, dmg, inboundScratch, weapon, false, 0);
+    const ev = events.find((e) => e.type === "killcam");
+    return ev && ev.type === "killcam" ? ev.spec : null;
   }
 
   return {
@@ -668,6 +1083,27 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     respawn,
     resetMatch,
     crash,
+    commitImpact,
+    hideProjectiles,
+    debugKillcam,
+    spawnLive,
+    clearLive,
+    syncLive,
+    setStaticIdle,
+    getTarget,
+    setRules,
+    puff: (x: number, y: number, z: number) => spawnSmoke(x, y, z, 1),
+    boomAt: (x: number, y: number, z: number, power = 1) => {
+      spawnBurst(x, y, z, 14, 16 * power);
+      spawnSmoke(x, y, z, 8);
+      spawnFireball(x, y, z, power);
+      spawnWave(x, world.heightAt(x, z) + 0.12, z);
+      flashLight.position.set(x, y + 1, z);
+      flashLight.intensity = 32 * power;
+    },
+    setTargetBeacons: (on: boolean) => {
+      for (const t of targets) setBeacons(t, on && t.alive);
+    },
     getBlips: refreshBlips,
     get weapon() {
       return weapon;
@@ -695,6 +1131,7 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     getYaw: () => drone.yaw,
     dispose: () => {
       scene.remove(droneBodyGroup);
+      scene.remove(flashLight);
       for (const t of targets) scene.remove(t.mesh);
       for (const p of pool) scene.remove(p.mesh);
       for (const p of particles) scene.remove(p.mesh);
@@ -702,10 +1139,23 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
         scene.remove(p.mesh);
         (p.mesh.material as THREE.Material).dispose();
       }
+      for (const p of debris) scene.remove(p.mesh);
+      for (const f of fires) {
+        scene.remove(f.mesh);
+        (f.mesh.material as THREE.Material).dispose();
+      }
+      for (const w of waves) {
+        scene.remove(w.mesh);
+        (w.mesh.material as THREE.Material).dispose();
+      }
       projGeo.dispose();
       pGeo.dispose();
       pMat.dispose();
       smokeGeo.dispose();
+      fireGeo.dispose();
+      waveGeo.dispose();
+      for (const g of debrisGeos) g.dispose();
+      for (const m of debrisMats) m.dispose();
       for (const m of Object.values(projMats)) m.dispose();
     },
   };

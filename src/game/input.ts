@@ -8,6 +8,7 @@ export type Actions = {
   boost: boolean;
   fire: boolean;
   detonate: boolean;
+  crouch: boolean;
   pausePress: boolean;
   weaponSlot: 0 | 1 | 2 | null;
 };
@@ -190,6 +191,7 @@ export function createInput(): InputController {
       boost: mergedHas("Space"),
       fire,
       detonate,
+      crouch: mergedHas("KeyC") || mergedHas("ControlLeft"),
       pausePress,
       weaponSlot,
     };

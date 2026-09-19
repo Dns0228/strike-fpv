@@ -1,5 +1,7 @@
 export type Armor = "soft" | "light" | "heavy";
 export type WeaponId = "frag" | "he" | "ap";
+export type GameMode = "free" | "arcade" | "assault";
+export type GroundUnit = "soldier" | "jeep";
 export type TargetKind =
   | "infantry"
   | "jeep"
@@ -172,8 +174,17 @@ export function expectedDamage(base: number, vs: Record<Armor, number>, armor: A
 }
 
 export const BEST_SCORE_KEY = "strikefpv-2-best";
+export const BEST_GROUND_KEY = "strikefpv-2-best-ground";
 export const SETTINGS_KEY = "strikefpv-2-settings";
 
 export const WORLD_SIZE = 420;
 export const DRONE_LIVES = 3;
 export const BATTERY_MAX = 100;
+
+/** Existing trench in the heightmap. Friendly z > FRONT_Z, enemy z < FRONT_Z. */
+export const FRONT_Z = -40;
+export const FRIENDLY = { x: -18, z: 16 };
+export const GROUND_START = { x: -14, z: 38 };
+/** Assault: reach the front line, not the far rear. */
+export const ASSAULT_GOAL = { x: 18, z: -40, r: 12 };
+export const EXTRACTION = ASSAULT_GOAL;

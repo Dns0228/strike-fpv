@@ -1,4 +1,5 @@
-import { ARMOR_LABEL, WEAPONS, WEAPON_ORDER, type WeaponId } from "@/game/catalog";
+import { ARMOR_LABEL, FRONT_Z, WEAPONS, WEAPON_ORDER, type WeaponId } from "@/game/catalog";
+import { isGroundSeat, MODES } from "@/game/modes";
 import { useGameStore, type RadarBlip } from "@/game/store";
 
 const CARDINALS: { deg: number; label: string }[] = [
@@ -13,6 +14,95 @@ const CARDINALS: { deg: number; label: string }[] = [
 ];
 
 export function Hud() {
+  const mode = useGameStore((s) => s.mode);
+  if (isGroundSeat(mode)) return <GroundHud />;
+  return <FpvHud />;
+}
+
+function GroundHud() {
+  const speed = useGameStore((s) => s.speed);
+  const heading = useGameStore((s) => s.heading);
+  const score = useGameStore((s) => s.score);
+  const detect = useGameStore((s) => s.detect);
+  const locked = useGameStore((s) => s.locked);
+  const conceal = useGameStore((s) => s.conceal);
+  const goalDist = useGameStore((s) => s.goalDist);
+  const hunters = useGameStore((s) => s.hunters);
+  const blips = useGameStore((s) => s.blips);
+  const droneX = useGameStore((s) => s.droneX);
+  const droneZ = useGameStore((s) => s.droneZ);
+  const hitFlash = useGameStore((s) => s.hitFlash);
+  const message = useGameStore((s) => s.message);
+  const unit = useGameStore((s) => s.unit);
+  const yaw = (-heading * Math.PI) / 180;
+  const tone = locked ? "text-danger" : detect > 0.45 ? "text-warn" : "text-ok";
+  const status = locked ? "ЗАХВАТ FPV" : detect > 0.45 ? "В ЗОНЕ" : conceal > 0.5 ? "УКРЫТИЕ" : "ТИШИНА";
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 font-mono text-hud">
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, transparent 52%, color-mix(in oklab, var(--color-bg) 50%, transparent) 100%)",
+        }}
+      />
+      {hitFlash > 0.05 ? (
+        <div className="absolute inset-0 bg-danger/20" style={{ opacity: hitFlash * 0.5 }} />
+      ) : null}
+
+      <header className="absolute left-0 right-0 top-0 flex items-start justify-between gap-3 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] md:p-5 short:p-2 short:pt-[max(0.4rem,env(safe-area-inset-top))]">
+        <div>
+          <div className="text-[10px] tracking-[0.28em] text-hud-dim uppercase">
+            Штурм · {unit === "jeep" ? "пикап" : "солдат"}
+          </div>
+          <div className={`mt-1 text-xs tabular ${tone}`}>{status}</div>
+        </div>
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            className="pointer-events-auto h-10 min-w-10 rounded-md border border-border bg-surface/80 px-3 font-mono text-[10px] tracking-widest uppercase text-muted"
+            onClick={() => useGameStore.getState().patch({ phase: "pause" })}
+          >
+            Пауза
+          </button>
+          <div className="text-right">
+            <div className="text-[10px] tracking-[0.2em] text-hud-dim uppercase">Счёт</div>
+            <div className="text-lg tabular leading-none text-fg">{score}</div>
+          </div>
+        </div>
+      </header>
+
+      <Compass heading={heading} />
+
+      <div className="absolute left-3 top-1/3 space-y-3 text-[11px] tabular md:left-5 short:top-20 short:left-[max(0.75rem,env(safe-area-inset-left))] short:space-y-2">
+        <Readout k="SPD" v={`${speed.toFixed(0)}`} u="м/с" />
+        <Readout k="ЦЕЛЬ" v={`${goalDist.toFixed(0)}`} u="м" />
+        <Readout k="HDG" v={`${heading.toFixed(0).padStart(3, "0")}`} u="°" />
+      </div>
+
+      <div className="absolute right-3 top-1/3 space-y-3 text-right text-[11px] tabular md:right-5 short:top-20 short:right-[max(0.75rem,env(safe-area-inset-right))] short:space-y-2">
+        <Readout k="FPV" v={`${hunters}`} u="в воздухе" tone={locked ? "text-danger" : "text-hud"} />
+        <Readout k="МАСК." v={`${Math.round(conceal * 100)}`} u="%" tone={conceal > 0.5 ? "text-ok" : "text-hud"} />
+      </div>
+
+      <Minimap blips={blips} x={droneX} z={droneZ} yaw={yaw} frontZ={FRONT_Z} />
+
+      <footer className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-5 short:p-2 short:pb-[max(0.4rem,env(safe-area-inset-bottom))]">
+        <div className="h-1.5 w-56 overflow-hidden rounded-full bg-border md:w-72">
+          <div
+            className={`h-full ${locked ? "bg-danger" : detect > 0.45 ? "bg-warn" : "bg-ok"}`}
+            style={{ width: `${Math.min(100, detect * 100)}%` }}
+          />
+        </div>
+        {message ? <p className="text-[11px] tracking-wide text-muted">{message}</p> : null}
+      </footer>
+    </div>
+  );
+}
+
+function FpvHud() {
+  const mode = useGameStore((s) => s.mode);
   const speed = useGameStore((s) => s.speed);
   const altitude = useGameStore((s) => s.altitude);
   const battery = useGameStore((s) => s.battery);
@@ -30,9 +120,15 @@ export function Hud() {
   const blips = useGameStore((s) => s.blips);
   const droneX = useGameStore((s) => s.droneX);
   const droneZ = useGameStore((s) => s.droneZ);
+  const wave = useGameStore((s) => s.wave);
+  const waves = useGameStore((s) => s.waves);
+  const breaches = useGameStore((s) => s.breaches);
+  const breachMax = useGameStore((s) => s.breachMax);
 
   const batTone = battery < 18 ? "text-danger" : battery < 40 ? "text-warn" : "text-hud";
   const yaw = (-heading * Math.PI) / 180;
+  const free = mode === "free";
+  const arcade = mode === "arcade";
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-mono text-hud">
@@ -46,6 +142,7 @@ export function Hud() {
       {hitFlash > 0.05 ? (
         <div className="absolute inset-0 bg-accent/10" style={{ opacity: hitFlash * 0.45 }} />
       ) : null}
+      <div className="fpv-scan absolute inset-0" />
 
       <div className="absolute left-1/2 top-1/2 size-8 -translate-x-1/2 -translate-y-1/2">
         <span className="absolute left-1/2 top-0 h-2 w-px -translate-x-1/2 bg-hud" />
@@ -55,11 +152,15 @@ export function Hud() {
         <span className="absolute left-1/2 top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-hud" />
       </div>
 
-      <header className="absolute left-0 right-0 top-0 flex items-start justify-between gap-3 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-5">
+      <header className="absolute left-0 right-0 top-0 flex items-start justify-between gap-3 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] md:p-5 short:p-2 short:pt-[max(0.4rem,env(safe-area-inset-top))]">
         <div>
-          <div className="text-[10px] tracking-[0.28em] text-hud-dim uppercase">Strike FPV 2.0</div>
+          <div className="text-[10px] tracking-[0.28em] text-hud-dim uppercase">{MODES[mode].title}</div>
           <div className="mt-1 text-xs tabular text-fg">
-            ЦЕЛИ {destroyed}/{total}
+            {free
+              ? "БЕЗ ЗАДАЧИ"
+              : arcade
+                ? `ВОЛНА ${wave}/${waves} · ПРОРЫВ ${breaches}/${breachMax}`
+                : `ЦЕЛИ ${destroyed}/${total}`}
           </div>
         </div>
         <div className="flex items-start gap-3">
@@ -79,18 +180,18 @@ export function Hud() {
 
       <Compass heading={heading} />
 
-      <div className="absolute left-3 top-1/3 space-y-3 text-[11px] tabular md:left-5">
+      <div className="absolute left-3 top-1/3 space-y-3 text-[11px] tabular md:left-5 short:top-20 short:left-[max(0.75rem,env(safe-area-inset-left))] short:space-y-2">
         <Readout k="SPD" v={`${speed.toFixed(0)}`} u="м/с" />
         <Readout k="ALT" v={`${altitude.toFixed(0)}`} u="м" />
         <Readout k="HDG" v={`${heading.toFixed(0).padStart(3, "0")}`} u="°" />
       </div>
 
-      <div className="absolute right-3 top-1/3 space-y-3 text-right text-[11px] tabular md:right-5">
+      <div className="absolute right-3 top-1/3 space-y-3 text-right text-[11px] tabular md:right-5 short:top-20 short:right-[max(0.75rem,env(safe-area-inset-right))] short:space-y-2">
         <Readout k="АКБ" v={`${battery.toFixed(0)}`} u="%" tone={batTone} />
-        <Readout k="БОРТ" v={`${lives}`} u="/ 3" />
+        <Readout k="БОРТ" v={free ? "∞" : `${lives}`} u={free ? "" : "/ 3"} />
       </div>
 
-      <Minimap blips={blips} x={droneX} z={droneZ} yaw={yaw} />
+      <Minimap blips={blips} x={droneX} z={droneZ} yaw={yaw} frontZ={FRONT_Z} />
 
       {lock ? (
         <div
@@ -129,7 +230,7 @@ export function Hud() {
         </div>
       ))}
 
-      <footer className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-5">
+      <footer className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-5 short:p-2 short:pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {message ? <p className="text-[11px] tracking-wide text-muted">{message}</p> : null}
         <div className="flex gap-1">
           {WEAPON_ORDER.map((id, i) => {
@@ -156,7 +257,7 @@ export function Hud() {
 
 function Compass({ heading }: { heading: number }) {
   return (
-    <div className="absolute left-1/2 top-14 w-52 -translate-x-1/2 overflow-hidden md:top-16 md:w-72">
+    <div className="absolute left-1/2 top-14 w-52 -translate-x-1/2 overflow-hidden md:top-16 md:w-72 short:top-10 short:w-44">
       <div className="relative h-7 border-b border-hud/35">
         {CARDINALS.map((m) => {
           const d = ((m.deg - heading + 540) % 360) - 180;
@@ -187,11 +288,13 @@ function Minimap({
   x,
   z,
   yaw,
+  frontZ,
 }: {
   blips: RadarBlip[];
   x: number;
   z: number;
   yaw: number;
+  frontZ?: number;
 }) {
   const size = 104;
   const scale = size / 260;
@@ -200,15 +303,31 @@ function Minimap({
   const cy = Math.cos(yaw);
   const sy = Math.sin(yaw);
 
+  function project(wx: number, wz: number) {
+    const dx = wx - x;
+    const dz = wz - z;
+    const lx = dx * cy + dz * -sy;
+    const lz = dx * -sy + dz * -cy;
+    return { px: half + lx * scale, py: half - lz * scale };
+  }
+
+  const p0 = frontZ != null ? project(-28, frontZ) : null;
+  const p1 = frontZ != null ? project(88, frontZ) : null;
+
   return (
     <div
-      className="absolute bottom-40 left-3 overflow-hidden rounded-sm border border-hud/40 bg-bg/75 md:bottom-8 md:left-5"
+      className="absolute bottom-40 left-3 overflow-hidden rounded-sm border border-hud/40 bg-bg/75 md:bottom-8 md:left-5 short:bottom-auto short:top-16 short:left-[max(0.75rem,env(safe-area-inset-left))]"
       style={{ width: size, height: size }}
     >
       <div className="absolute inset-0 opacity-40">
         <div className="absolute left-1/2 top-0 h-full w-px bg-hud/30" />
         <div className="absolute left-0 top-1/2 h-px w-full bg-hud/30" />
       </div>
+      {p0 && p1 ? (
+        <svg className="absolute inset-0" width={size} height={size} aria-hidden>
+          <line x1={p0.px} y1={p0.py} x2={p1.px} y2={p1.py} stroke="#c45c4a" strokeWidth="1.5" strokeDasharray="3 2" />
+        </svg>
+      ) : null}
       <div className="absolute left-1/2 top-1 h-2 w-px -translate-x-1/2 bg-hud" />
       {blips.map((b) => {
         const dx = b.x - x;

@@ -1,8 +1,9 @@
 import { create } from "zustand";
-import type { Armor, TargetKind, WeaponId } from "./catalog";
+import type { Armor, GameMode, GroundUnit, TargetKind, WeaponId } from "./catalog";
 import { SETTINGS_KEY, WEAPONS } from "./catalog";
+import { parseMode } from "./modes";
 
-export type Phase = "hangar" | "flight" | "pause" | "dead" | "victory";
+export type Phase = "hangar" | "flight" | "pause" | "dead" | "victory" | "replay";
 
 export type LockInfo = {
   label: string;
@@ -34,8 +35,22 @@ export type RadarBlip = {
   alive: boolean;
 };
 
+export type ReplayHudInfo = {
+  label: string;
+  armor: Armor;
+  damage: number;
+  kill: boolean;
+  weapon: WeaponId | "kami";
+  hp: number;
+  maxHp: number;
+  secondary: number;
+  impacted: boolean;
+};
+
 export type GameHud = {
   phase: Phase;
+  mode: GameMode;
+  unit: GroundUnit;
   weapon: WeaponId;
   ammo: Record<WeaponId, number>;
   lives: number;
@@ -45,6 +60,7 @@ export type GameHud = {
   heading: number;
   score: number;
   best: number;
+  bestGround: number;
   destroyed: number;
   totalTargets: number;
   lock: LockInfo | null;
@@ -57,6 +73,16 @@ export type GameHud = {
   blips: RadarBlip[];
   droneX: number;
   droneZ: number;
+  detect: number;
+  locked: boolean;
+  conceal: number;
+  goalDist: number;
+  hunters: number;
+  wave: number;
+  waves: number;
+  breaches: number;
+  breachMax: number;
+  replay: ReplayHudInfo | null;
   patch: (partial: Partial<Omit<GameHud, "patch">>) => void;
 };
 
@@ -73,7 +99,13 @@ function persistSettings() {
   const st = useGameStore.getState();
   localStorage.setItem(
     SETTINGS_KEY,
-    JSON.stringify({ invertY: st.invertY, muted: st.muted, shake: st.shake }),
+    JSON.stringify({
+      invertY: st.invertY,
+      muted: st.muted,
+      shake: st.shake,
+      mode: st.mode,
+      unit: st.unit,
+    }),
   );
 }
 
@@ -82,11 +114,19 @@ export function loadSettings(): void {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return;
-    const s = JSON.parse(raw) as { invertY?: boolean; muted?: boolean; shake?: boolean };
+    const s = JSON.parse(raw) as {
+      invertY?: boolean;
+      muted?: boolean;
+      shake?: boolean;
+      mode?: GameMode;
+      unit?: GroundUnit;
+    };
     useGameStore.getState().patch({
       invertY: !!s.invertY,
       muted: !!s.muted,
       shake: s.shake !== false,
+      mode: parseMode(s.mode),
+      unit: s.unit === "jeep" ? "jeep" : "soldier",
     });
   } catch {
     /* ignore */
@@ -95,6 +135,8 @@ export function loadSettings(): void {
 
 export const useGameStore = create<GameHud>((set) => ({
   phase: "hangar",
+  mode: "arcade",
+  unit: "soldier",
   weapon: "he",
   ammo: emptyAmmo(),
   lives: 3,
@@ -104,6 +146,7 @@ export const useGameStore = create<GameHud>((set) => ({
   heading: 0,
   score: 0,
   best: 0,
+  bestGround: 0,
   destroyed: 0,
   totalTargets: 0,
   lock: null,
@@ -116,9 +159,27 @@ export const useGameStore = create<GameHud>((set) => ({
   blips: [],
   droneX: 0,
   droneZ: 0,
+  detect: 0,
+  locked: false,
+  conceal: 0,
+  goalDist: 0,
+  hunters: 0,
+  wave: 1,
+  waves: 3,
+  breaches: 0,
+  breachMax: 3,
+  replay: null,
   patch: (partial) => {
     set(partial);
-    if ("invertY" in partial || "muted" in partial || "shake" in partial) persistSettings();
+    if (
+      "invertY" in partial ||
+      "muted" in partial ||
+      "shake" in partial ||
+      "mode" in partial ||
+      "unit" in partial
+    ) {
+      persistSettings();
+    }
   },
 }));
 

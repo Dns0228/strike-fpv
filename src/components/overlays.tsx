@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { isGroundSeat } from "@/game/modes";
 import { useGameStore } from "@/game/store";
 
 type Props = {
@@ -10,48 +11,71 @@ type Props = {
 
 export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
   const phase = useGameStore((s) => s.phase);
+  const mode = useGameStore((s) => s.mode);
   const score = useGameStore((s) => s.score);
   const best = useGameStore((s) => s.best);
+  const bestGround = useGameStore((s) => s.bestGround);
   const lives = useGameStore((s) => s.lives);
-  const destroyed = useGameStore((s) => s.destroyed);
-  const total = useGameStore((s) => s.totalTargets);
   const invertY = useGameStore((s) => s.invertY);
   const muted = useGameStore((s) => s.muted);
+  const wave = useGameStore((s) => s.wave);
+  const breaches = useGameStore((s) => s.breaches);
   const patch = useGameStore((s) => s.patch);
+  const ground = isGroundSeat(mode);
+  const arcade = mode === "arcade";
 
-  if (phase === "hangar" || phase === "flight") return null;
+  if (phase === "hangar" || phase === "flight" || phase === "replay") return null;
 
-  const lostDrone = phase === "dead" && lives > 0;
+  const lostDrone = phase === "dead" && lives > 0 && !ground;
   const win = phase === "victory";
   const paused = phase === "pause";
 
   const title = paused
     ? "Пауза"
     : win
-      ? "Полигон зачищен"
+      ? ground
+        ? "Линия взята"
+        : arcade
+          ? "Линия удержана"
+          : "Полёт окончен"
       : lostDrone
         ? "Дрон потерян"
-        : "Вылет сорван";
+        : ground
+          ? "Группа накрыта"
+          : arcade
+            ? "Прорыв линии"
+            : "Вылет сорван";
 
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-bg/55 p-4 backdrop-blur-[2px]">
-      <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-6">
+    <div className="absolute inset-0 z-30 flex items-center justify-center bg-bg/55 p-4 backdrop-blur-[2px] short:p-3 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))]">
+      <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-6 short:p-4 short:max-h-[min(100dvh,22rem)] short:overflow-y-auto">
         <p className="font-mono text-[10px] tracking-[0.22em] text-hud-dim uppercase">STRIKE FPV 2.0</p>
         <h2 className="font-display mt-2 text-3xl font-semibold text-fg">{title}</h2>
         <p className="mt-2 text-sm text-muted">
           {win
-            ? "Все цели поражены. Можно идти на второй круг с другой БЧ."
+            ? ground
+              ? "Вы вышли на линию фронта. FPV не успел."
+              : arcade
+                ? "Три волны отбиты. Ленту не пересекли."
+                : "Свободный полёт можно повторить с другой БЧ."
             : lostDrone
               ? "Есть запасной борт. Смените боевую часть, если броня не берётся."
               : paused
                 ? "Мир заморожен. WASD не сбрасывается — проверьте стики."
-                : "Батарея, столкновение или подрыв. Рекорд сохранён на этом устройстве."}
+                : ground
+                  ? "Охотничий FPV нашёл вас в открытом поле. Прячьтесь под кронами."
+                  : arcade
+                    ? "Слишком много групп пересекли красную ленту."
+                    : "Батарея или столкновение. Можно сразу в воздух."}
         </p>
 
         <dl className="mt-5 grid grid-cols-3 gap-2 text-center">
           <Mini k="Счёт" v={String(score)} />
-          <Mini k="Цели" v={`${destroyed}/${total}`} />
-          <Mini k="Рекорд" v={String(best)} />
+          <Mini
+            k={ground ? "Режим" : arcade ? "Волна" : "Режим"}
+            v={ground ? "штурм" : arcade ? `${wave} · прорыв ${breaches}` : "полёт"}
+          />
+          <Mini k="Рекорд" v={String(ground ? bestGround : best)} />
         </dl>
 
         {paused ? (
@@ -83,7 +107,7 @@ export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
           ) : lostDrone ? (
             <Primary onClick={onNext}>Следующий борт</Primary>
           ) : (
-            <Primary onClick={onRestart}>Повторный вылет</Primary>
+            <Primary onClick={onRestart}>{ground ? "Ещё штурм" : arcade ? "Ещё оборона" : "Ещё полёт"}</Primary>
           )}
           <button
             type="button"

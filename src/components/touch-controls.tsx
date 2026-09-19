@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import type { GameHandle } from "@/game/engine";
+import { isGroundSeat } from "@/game/modes";
 import { useGameStore } from "@/game/store";
 
 type Props = {
@@ -8,20 +9,25 @@ type Props = {
 
 export function TouchControls({ game }: Props) {
   const phase = useGameStore((s) => s.phase);
+  const mode = useGameStore((s) => s.mode);
   if (phase !== "flight") return null;
+  const ground = isGroundSeat(mode);
   return (
-    <div className="pointer-events-none absolute inset-0 z-20 md:hidden">
-      <Stick
-        side="left"
-        onChange={(x, y, a) => game?.input.setLeftStick(x, y, a)}
-      />
-      <Stick
-        side="right"
-        onChange={(x, y, a) => game?.input.setRightStick(x, y, a)}
-      />
-      <div className="pointer-events-auto absolute right-4 bottom-36 flex flex-col gap-3">
-        <HoldButton label="Огонь" onHold={(v) => game?.input.setTouchFire(v)} primary />
-        <HoldButton label="Подрыв" onHold={(v) => game?.input.setTouchDetonate(v)} />
+    <div className="pointer-events-none absolute inset-0 z-20 hidden coarse:block">
+      <Stick side="left" onChange={(x, y, a) => game?.input.setLeftStick(x, y, a)} />
+      <Stick side="right" onChange={(x, y, a) => game?.input.setRightStick(x, y, a)} />
+      <div className="pointer-events-auto absolute right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(max(0.75rem,env(safe-area-inset-bottom))+7.25rem)] flex gap-3">
+        {ground ? (
+          <>
+            <HoldButton label="Бег" onHold={(v) => game?.input.setTouchFire(v)} primary />
+            <HoldButton label="Сесть" onHold={(v) => game?.input.setTouchDetonate(v)} />
+          </>
+        ) : (
+          <>
+            <HoldButton label="Огонь" onHold={(v) => game?.input.setTouchFire(v)} primary />
+            <HoldButton label="Подрыв" onHold={(v) => game?.input.setTouchDetonate(v)} />
+          </>
+        )}
       </div>
     </div>
   );
@@ -71,8 +77,10 @@ function Stick({
 
   return (
     <div
-      className={`pointer-events-auto absolute bottom-8 size-28 rounded-full border border-border bg-surface/40 ${
-        side === "left" ? "left-4" : "right-28"
+      className={`pointer-events-auto absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] size-28 rounded-full border border-border bg-surface/40 short:size-24 ${
+        side === "left"
+          ? "left-[max(1rem,env(safe-area-inset-left))]"
+          : "right-[max(1rem,env(safe-area-inset-right))]"
       }`}
       onPointerDown={onDown}
       onPointerMove={onMove}
