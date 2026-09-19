@@ -28,6 +28,8 @@ export type InputController = {
   setRightStick: (x: number, y: number, active: boolean) => void;
   setTouchFire: (v: boolean) => void;
   setTouchDetonate: (v: boolean) => void;
+  setTouchBoost: (v: boolean) => void;
+  setTouchCrouch: (v: boolean) => void;
   requestLock: () => void;
   isLocked: () => boolean;
   keys: Set<string>;
@@ -60,6 +62,11 @@ const GAME_CODES = new Set([
   "Escape",
 ]);
 
+function isCoarse(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(pointer: coarse)").matches || window.matchMedia("(hover: none)").matches;
+}
+
 export function createInput(): InputController {
   const keys = new Set<string>();
   const synthetic = new Set<string>();
@@ -70,6 +77,8 @@ export function createInput(): InputController {
   let fireHeld = false;
   let touchFire = false;
   let touchDetonate = false;
+  let touchBoost = false;
+  let touchCrouch = false;
   let host: HTMLElement | null = null;
   let prevPause = false;
 
@@ -141,6 +150,10 @@ export function createInput(): InputController {
     host = null;
     clearKeys();
     synthetic.clear();
+    touchFire = false;
+    touchDetonate = false;
+    touchBoost = false;
+    touchCrouch = false;
   }
 
   function sample(invertY: boolean): Actions {
@@ -188,10 +201,10 @@ export function createInput(): InputController {
       yaw,
       pitch,
       roll,
-      boost: mergedHas("Space"),
+      boost: mergedHas("Space") || touchBoost,
       fire,
       detonate,
-      crouch: mergedHas("KeyC") || mergedHas("ControlLeft"),
+      crouch: mergedHas("KeyC") || mergedHas("ControlLeft") || touchCrouch,
       pausePress,
       weaponSlot,
     };
@@ -205,7 +218,7 @@ export function createInput(): InputController {
   }
 
   function requestLock() {
-    if (!host) return;
+    if (!host || isCoarse()) return;
     const req = host.requestPointerLock?.bind(host);
     if (!req) return;
     try {
@@ -235,22 +248,36 @@ export function createInput(): InputController {
     leftStick,
     rightStick,
     setLeftStick: (x, y, active) => {
-      const d = radialDeadzone(x, y);
+      const d = radialDeadzone(x, y, 0.12);
       leftStick.x = d.x;
       leftStick.y = d.y;
       leftStick.active = active;
+      if (!active) {
+        leftStick.x = 0;
+        leftStick.y = 0;
+      }
     },
     setRightStick: (x, y, active) => {
-      const d = radialDeadzone(x, y);
+      const d = radialDeadzone(x, y, 0.12);
       rightStick.x = d.x;
       rightStick.y = d.y;
       rightStick.active = active;
+      if (!active) {
+        rightStick.x = 0;
+        rightStick.y = 0;
+      }
     },
     setTouchFire: (v) => {
       touchFire = v;
     },
     setTouchDetonate: (v) => {
       touchDetonate = v;
+    },
+    setTouchBoost: (v) => {
+      touchBoost = v;
+    },
+    setTouchCrouch: (v) => {
+      touchCrouch = v;
     },
     requestLock,
     isLocked: () => locked,

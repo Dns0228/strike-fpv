@@ -101,6 +101,9 @@ function GroundHud() {
         <p className="hidden text-[10px] tracking-wide text-subtle coarse:hidden md:block">
           W ход · A/D поворот · мышь камера · пробел бег · Ctrl присесть
         </p>
+        <p className="hidden text-[10px] tracking-wide text-subtle coarse:block">
+          Левый стик — ход · правый — камера · Бег / Сесть
+        </p>
       </footer>
     </div>
   );
@@ -323,7 +326,7 @@ function Minimap({
 
   return (
     <div
-      className="absolute bottom-40 left-3 overflow-hidden rounded-sm border border-hud/40 bg-bg/75 md:bottom-8 md:left-5 short:bottom-auto short:top-16 short:left-[max(0.75rem,env(safe-area-inset-left))]"
+      className="absolute bottom-40 left-3 overflow-hidden rounded-sm border border-hud/40 bg-bg/75 md:bottom-8 md:left-5 short:bottom-auto short:top-16 short:left-[max(0.75rem,env(safe-area-inset-left))] coarse:bottom-auto coarse:top-14 coarse:left-[max(0.75rem,env(safe-area-inset-left))]"
       style={{ width: size, height: size }}
     >
       <div className="absolute inset-0 opacity-40">

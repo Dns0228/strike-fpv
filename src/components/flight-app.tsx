@@ -40,7 +40,7 @@ export function FlightApp() {
   };
 
   return (
-    <main className="relative h-[100dvh] w-full overflow-hidden bg-bg text-fg">
+    <main className="relative h-[100dvh] w-full overflow-hidden bg-bg text-fg touch-none">
       <canvas
         ref={canvasRef}
         className="absolute inset-0 size-full touch-none"

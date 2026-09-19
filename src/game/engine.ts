@@ -23,6 +23,7 @@ export type ControlsProbe = {
   getSpeed: () => number;
   setSteer?: (v: number) => void;
   setKeys?: (codes: string[]) => void;
+  setLeftStick?: (x: number, y: number) => void;
 };
 
 declare global {
@@ -687,6 +688,10 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       getSpeed: () => (isGroundSeat(useGameStore.getState().mode) ? ground.getSpeed() : sim.getSpeed()),
       setKeys: (codes) => input.setKeys(codes),
       setSteer: (v) => input.setSteer(v),
+      setLeftStick: (x, y) => {
+        if (x === 0 && y === 0) input.setLeftStick(0, 0, false);
+        else input.setLeftStick(x, y, true);
+      },
     };
     window.__strikeFpv = {
       phase: useGameStore.getState().phase,

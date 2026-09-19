@@ -511,8 +511,8 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
     time += dt;
     lookYaw -= mouse.dx * 0.0024;
     lookPitch += (invertY ? -mouse.dy : mouse.dy) * 0.002;
-    lookYaw += actions.roll * 1.45 * dt;
-    lookPitch += actions.pitch * 0.95 * dt;
+    lookYaw += actions.roll * 2.15 * dt;
+    lookPitch += actions.pitch * 1.35 * dt;
     lookPitch = clamp(lookPitch, -0.08, 0.72);
     lookYaw = clamp(lookYaw, -1.15, 1.15);
 
