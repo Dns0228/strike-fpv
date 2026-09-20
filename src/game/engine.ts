@@ -120,6 +120,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   let lastVision: VisionMode | null = null;
   let radioT = 9;
   let boomT = 16;
+  let fovS = 86;
 
   const best = Number(localStorage.getItem(BEST_SCORE_KEY) || "0") || 0;
   const bestGround = Number(localStorage.getItem(BEST_GROUND_KEY) || "0") || 0;
@@ -772,9 +773,10 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
         followSun(ground.player.pos.x, ground.player.pos.z);
         handleGroundEvents();
       } else if (flying) {
-        const wantFov = 84 + Math.min(1, sim.getSpeed() / 38) * 12;
-        if (Math.abs(camera.fov - wantFov) > 0.4) {
-          camera.fov = wantFov;
+        const wantFov = 86 + Math.min(1, sim.getSpeed() / 52) * 5 + sim.trauma * 2.4;
+        fovS += (wantFov - fovS) * (1 - Math.exp(-5 * dt));
+        if (Math.abs(camera.fov - fovS) > 0.12) {
+          camera.fov = fovS;
           camera.updateProjectionMatrix();
         }
         sim.tick(dt, actions, mouse, st.invertY, true, camera, st.shake);

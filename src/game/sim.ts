@@ -89,14 +89,14 @@ const _ndc = new THREE.Vector2(0, 0);
 const _yAxis = new THREE.Vector3(0, 1, 0);
 
 const GRAVITY = 18;
-const THRUST = 42;
+const THRUST = 46;
 const HOVER = GRAVITY / THRUST;
-const MAX_PITCH = 0.72;
-const MAX_ROLL = 0.7;
-const YAW_RATE = 1.85;
+const MAX_PITCH = 0.78;
+const MAX_ROLL = 0.62;
+const YAW_RATE = 2.55;
 const FIXED = 1 / 60;
-const FWD_THRUST = 22;
-const NOSE_DOWN = 0.16;
+const FWD_THRUST = 28;
+const NOSE_DOWN = 0.26;
 
 const DEBRIS_TINT: Record<TargetKind, number> = {
   infantry: 1,
@@ -157,11 +157,29 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     });
   }
 
-  const projGeo = new THREE.CylinderGeometry(0.04, 0.09, 0.7, 6);
+  const projGeo = new THREE.CylinderGeometry(0.022, 0.055, 1.45, 5);
   const projMats: Record<WeaponId, THREE.MeshBasicMaterial> = {
-    frag: new THREE.MeshBasicMaterial({ color: WEAPONS.frag.color }),
-    he: new THREE.MeshBasicMaterial({ color: WEAPONS.he.color }),
-    ap: new THREE.MeshBasicMaterial({ color: WEAPONS.ap.color }),
+    frag: new THREE.MeshBasicMaterial({
+      color: WEAPONS.frag.color,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+    he: new THREE.MeshBasicMaterial({
+      color: WEAPONS.he.color,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+    ap: new THREE.MeshBasicMaterial({
+      color: WEAPONS.ap.color,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
   };
   const pool: Projectile[] = [];
   for (let i = 0; i < 24; i++) {
@@ -336,6 +354,7 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
   let trauma = 0;
   let hitstop = 0;
   let simTime = 0;
+  let yawVel = 0;
   const blips: RadarBlip[] = [];
   let impactCommitted = true;
   let pendingImpact: { x: number; y: number; z: number; power: number } | null = null;
@@ -692,9 +711,11 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     p.vel.copy(_tmp).multiplyScalar(w.speed).addScaledVector(drone.vel, 0.25);
     p.mesh.position.copy(p.pos);
     orientRocket(p);
-    spawnBurst(p.pos.x, p.pos.y, p.pos.z, 3, 4);
+    spawnBurst(p.pos.x, p.pos.y, p.pos.z, 4, 5);
+    drone.vel.addScaledVector(_tmp, -2.4);
+    drone.pitch = clamp(drone.pitch - 0.03, -1.15, 1.15);
     events.push({ type: "shot", weapon });
-    trauma = Math.min(1, trauma + 0.18);
+    trauma = Math.min(1, trauma + 0.16);
   }
 
   function presentCrash(kamikaze: boolean) {
@@ -750,6 +771,7 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     drone.battery = BATTERY_MAX;
     drone.alive = true;
     drone.invuln = 2.2;
+    yawVel = 0;
     ammo.frag = WEAPONS.frag.ammo;
     ammo.he = WEAPONS.he.ammo;
     ammo.ap = WEAPONS.ap.ammo;
@@ -1027,14 +1049,16 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
 
     const lookX = mouse.dx * 0.0022;
     const lookY = mouse.dy * 0.0020 * (invertY ? 1 : -1);
-    drone.yaw += actions.yaw * YAW_RATE * dt - lookX;
-    drone.yaw += drone.roll * 0.85 * dt;
+    const yawCmd = actions.yaw * YAW_RATE;
+    yawVel = expDamp(yawVel, yawCmd, 18, dt);
+    drone.yaw += yawVel * dt - lookX;
+    drone.yaw += drone.roll * 0.55 * dt;
     const autoPitch = -actions.throttle * NOSE_DOWN;
     const pitchTarget = actions.pitch * MAX_PITCH + autoPitch;
-    const rollTarget = actions.roll * MAX_ROLL;
-    drone.pitch = expDamp(drone.pitch, pitchTarget, 7, dt) + lookY;
+    const rollTarget = actions.roll * MAX_ROLL + actions.yaw * 0.32;
+    drone.pitch = expDamp(drone.pitch, pitchTarget, 9, dt) + lookY;
     drone.pitch = clamp(drone.pitch, -1.15, 1.15);
-    drone.roll = expDamp(drone.roll, rollTarget, 8, dt);
+    drone.roll = expDamp(drone.roll, rollTarget, 9, dt);
 
     basis();
     lockId = 0;
@@ -1068,8 +1092,8 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       }
     }
 
-    const thrTarget = clamp(HOVER + actions.throttle * 0.22 + (actions.boost ? 0.28 : 0), 0.08, 1);
-    drone.throttle = expDamp(drone.throttle, thrTarget, 6, dt);
+    const thrTarget = clamp(HOVER + actions.throttle * 0.16 + (actions.boost ? 0.34 : 0), 0.06, 1);
+    drone.throttle = expDamp(drone.throttle, thrTarget, 8, dt);
 
     basis();
     const lift = drone.throttle * THRUST;
@@ -1077,18 +1101,26 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     drone.vel.y -= GRAVITY * dt;
     const hx = -Math.sin(drone.yaw);
     const hz = -Math.cos(drone.yaw);
-    drone.vel.x += hx * actions.throttle * FWD_THRUST * dt;
-    drone.vel.z += hz * actions.throttle * FWD_THRUST * dt;
+    const fwdWant = actions.throttle * FWD_THRUST;
+    drone.vel.x += hx * fwdWant * dt;
+    drone.vel.z += hz * fwdWant * dt;
+    drone.vel.addScaledVector(_fwd, Math.max(0, actions.throttle) * 6.5 * dt);
     const wind = world.getWind();
-    const wForce = 3.4 + wind.gust * 9.5;
+    const wForce = 5.2 + wind.gust * 14;
     drone.vel.x += wind.x * wForce * dt;
     drone.vel.z += wind.z * wForce * dt;
-    drone.vel.y += Math.sin(simTime * 7.2) * wind.gust * 2.4 * dt;
-    drone.roll += Math.sin(simTime * 8.4) * wind.gust * 0.07;
-    drone.pitch += Math.sin(simTime * 6.1 + 1.1) * wind.gust * 0.03;
-    drone.vel.multiplyScalar(Math.exp(-1.55 * dt));
+    drone.vel.y += Math.sin(simTime * 5.4) * wind.gust * 3.2 * dt;
+    drone.roll += Math.sin(simTime * 8.4) * wind.gust * 0.05;
+    drone.pitch += Math.sin(simTime * 6.1 + 1.1) * wind.gust * 0.025;
+    if (Math.abs(actions.yaw) < 0.2) {
+      const cross = wind.x * hz - wind.z * hx;
+      drone.yaw += cross * wind.gust * 0.12 * dt;
+    }
+    drone.vel.x *= Math.exp(-1.12 * dt);
+    drone.vel.z *= Math.exp(-1.12 * dt);
+    drone.vel.y *= Math.exp(-1.85 * dt);
     if (Math.abs(actions.throttle) < 0.08 && !actions.boost && Math.abs(actions.pitch) < 0.08) {
-      drone.vel.y *= Math.exp(-3.2 * dt);
+      drone.vel.y *= Math.exp(-2.6 * dt);
     }
     drone.pos.addScaledVector(drone.vel, dt);
 
@@ -1099,7 +1131,7 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     const pad = world.spawnPad;
     const padDist = Math.hypot(drone.pos.x - pad.x, drone.pos.z - pad.z);
     onPad = padDist < 5.4 && drone.pos.y < pad.y + 6.5;
-    if (onPad && drone.vel.length() < 16) {
+    if (onPad && drone.vel.length() < 16 && Math.abs(actions.throttle) < 0.28 && !actions.boost) {
       drone.vel.multiplyScalar(Math.exp(-2.2 * dt));
       if (drone.pos.y < pad.y + 2.4) {
         drone.pos.y = Math.max(drone.pos.y, pad.y + 0.55);
@@ -1125,16 +1157,21 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     } else rearmT = 0;
 
     const ground = world.heightAt(drone.pos.x, drone.pos.z) + 0.55;
+    const alt = drone.pos.y - (ground - 0.55);
+    if (alt < 2.2 && drone.vel.y < 3) {
+      drone.vel.y += (2.2 - Math.max(0.2, alt)) * 10 * dt;
+    }
     if (drone.pos.y < ground) {
+      const vDown = -Math.min(0, drone.vel.y);
+      const horiz = Math.hypot(drone.vel.x, drone.vel.z);
       drone.pos.y = ground;
-      const spd = drone.vel.length();
-      if (spd > 12 && drone.invuln <= 0) crash(spd > 18);
+      if (vDown > 16 && drone.invuln <= 0) crash(vDown > 22 || horiz > 24);
       else {
-        drone.vel.y = Math.max(0, drone.vel.y);
-        drone.vel.multiplyScalar(0.35);
+        drone.vel.y = vDown > 5 ? vDown * -0.16 : Math.max(0, drone.vel.y);
+        drone.vel.x *= 0.78;
+        drone.vel.z *= 0.78;
       }
     }
-    const alt = drone.pos.y - (ground - 0.55);
     if (alt < 3.8 && drone.throttle > 0.38) {
       washAcc += dt * (0.55 + drone.throttle);
       if (washAcc > 0.16) {
@@ -1200,6 +1237,9 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       p.life -= dt;
       p.mesh.position.copy(p.pos);
       orientRocket(p);
+      if (p.life > 0.05 && Math.random() < 0.18) {
+        spawnBurst(p.pos.x, p.pos.y, p.pos.z, 1, 1.6);
+      }
       const ground = world.heightAt(p.pos.x, p.pos.z);
       let hit = p.pos.y < ground || p.life <= 0 || buildingHit(p.pos.x, p.pos.y, p.pos.z);
       let primary: Target | null = null;
@@ -1225,13 +1265,20 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
           const focusDmg = !primary.alive ? dmg : w.baseDamage * w.vs[focus.armor];
           emitKillcam(focus, focusDmg, p.vel, p.weapon, false, extra.filter((t) => t !== focus).length);
         } else {
-          spawnBurst(p.pos.x, p.pos.y, p.pos.z, 6, 8);
+          spawnBurst(p.pos.x, p.pos.y, p.pos.z, 10, 12);
+          spawnWave(p.pos.x, world.heightAt(p.pos.x, p.pos.z) + 0.12, p.pos.z);
+          flashLight.position.copy(p.pos);
+          flashLight.intensity = 32;
         }
         trauma = Math.min(1, trauma + 0.28);
         hitstop = 0.045;
       } else if (hit && p.pos.y < ground + 0.5) {
         const extra = splashAt(p.pos.x, ground, p.pos.z, p.weapon, false, null);
-        spawnBurst(p.pos.x, p.pos.y, p.pos.z, 6, 8);
+        spawnBurst(p.pos.x, p.pos.y, p.pos.z, 10, 12);
+        spawnWave(p.pos.x, ground + 0.12, p.pos.z);
+        spawnScorch(p.pos.x, p.pos.z, 0.55);
+        flashLight.position.set(p.pos.x, ground + 0.8, p.pos.z);
+        flashLight.intensity = 36;
         if (extra.length) {
           emitKillcam(extra[0], WEAPONS[p.weapon].baseDamage * WEAPONS[p.weapon].vs[extra[0].armor], p.vel, p.weapon, false, extra.length - 1);
         }
@@ -1319,9 +1366,9 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       if (w.life <= 0) continue;
       w.life -= dt;
       const u = 1 - w.life / w.max;
-      w.mesh.scale.setScalar(0.6 + u * 18);
+      w.mesh.scale.setScalar(0.7 + u * 24);
       const mat = w.mesh.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.55 * (1 - u);
+      mat.opacity = 0.7 * (1 - u);
       if (w.life <= 0) w.mesh.visible = false;
     }
     for (const s of scorches) {
@@ -1336,11 +1383,14 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     _euler.set(drone.pitch, drone.yaw, drone.roll, "YXZ");
     camera.quaternion.setFromEuler(_euler);
     camera.position.copy(drone.pos);
-    const shake = trauma * trauma;
-    if (shakeOn && shake > 0.002) {
-      camera.position.x += (Math.random() - 0.5) * shake * 0.7;
-      camera.position.y += (Math.random() - 0.5) * shake * 0.55;
-      camera.position.z += (Math.random() - 0.5) * shake * 0.7;
+    _tmp.set(0, 0.02, -0.1).applyQuaternion(camera.quaternion);
+    camera.position.add(_tmp);
+    const spd = drone.vel.length();
+    const vib = trauma * (trauma > 0.55 ? 0.38 : 0.18) + Math.min(0.035, spd * 0.0009);
+    if (shakeOn && vib > 0.002) {
+      camera.position.x += (Math.random() - 0.5) * vib;
+      camera.position.y += (Math.random() - 0.5) * vib * 0.7;
+      camera.position.z += (Math.random() - 0.5) * vib;
     }
     droneBodyGroup.position.copy(drone.pos);
     droneBodyGroup.quaternion.copy(camera.quaternion);
@@ -1530,6 +1580,7 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     scanCd = 0;
     lockId = 0;
     onPad = false;
+    yawVel = 0;
     sortieTime = 0;
     flakHits = 0;
     rearmCount = 0;

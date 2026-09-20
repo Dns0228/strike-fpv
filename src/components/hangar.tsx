@@ -263,7 +263,7 @@ export function Hangar({ onStart, ready }: Props) {
             <>
               <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] leading-snug text-muted coarse:hidden">
                 <li>
-                  <span className="text-fg">W</span> — вперёд
+                  <span className="text-fg">W</span> — вперёд, нос вниз
                 </li>
                 <li>
                   <span className="text-fg">A / D</span> — рысканье
