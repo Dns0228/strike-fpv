@@ -36,11 +36,14 @@ export function TouchControls({ game }: Props) {
               primary
             />
             {!jeep ? <HoldButton label="Сесть" onHold={(v) => game?.input.setTouchCrouch(v)} /> : null}
+            <TapButton label="Слух" onTap={() => game?.input.setTouchScan()} />
+            <TapButton label="ТПВ" onTap={() => game?.input.setTouchVision()} />
           </>
         ) : (
           <>
             <HoldButton label="Огонь" onHold={(v) => game?.input.setTouchFire(v)} primary />
             <TapButton label="Скан" onTap={() => game?.input.setTouchScan()} />
+            <TapButton label="ТПВ" onTap={() => game?.input.setTouchVision()} />
             <HoldButton label="Подрыв" onHold={(v) => game?.input.setTouchDetonate(v)} />
           </>
         )}

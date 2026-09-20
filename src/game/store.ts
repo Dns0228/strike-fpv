@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { Armor, GameMode, GroundUnit, TargetKind, WeaponId } from "./catalog";
-import { SETTINGS_KEY, WEAPONS } from "./catalog";
+import type { Armor, GameMode, GroundUnit, TargetKind, VisionMode, WeaponId } from "./catalog";
+import { SETTINGS_KEY, WEAPONS, parseVision } from "./catalog";
 import { parseMode } from "./modes";
 
 export type Phase = "hangar" | "flight" | "pause" | "dead" | "victory" | "replay";
@@ -81,6 +81,7 @@ export type GameHud = {
   muted: boolean;
   tod: "day" | "night";
   autoaim: boolean;
+  vision: VisionMode;
   blips: RadarBlip[];
   droneX: number;
   droneZ: number;
@@ -100,6 +101,10 @@ export type GameHud = {
   scanMarks: ScanMark[];
   onPad: boolean;
   pad: boolean;
+  threatRel: number;
+  threatDist: number;
+  threatLabel: string;
+  nearGoal: boolean;
   patch: (partial: Partial<Omit<GameHud, "patch">>) => void;
 };
 
@@ -124,6 +129,7 @@ function persistSettings() {
       unit: st.unit,
       tod: st.tod,
       autoaim: st.autoaim,
+      vision: st.vision,
     }),
   );
 }
@@ -141,6 +147,7 @@ export function loadSettings(): void {
       unit?: GroundUnit;
       tod?: "day" | "night";
       autoaim?: boolean;
+      vision?: VisionMode;
     };
     useGameStore.getState().patch({
       invertY: !!s.invertY,
@@ -150,6 +157,7 @@ export function loadSettings(): void {
       unit: s.unit === "jeep" ? "jeep" : "soldier",
       tod: s.tod === "night" ? "night" : "day",
       autoaim: s.autoaim !== false,
+      vision: parseVision(s.vision),
     });
   } catch {
     /* ignore */
@@ -181,6 +189,7 @@ export const useGameStore = create<GameHud>((set) => ({
   muted: false,
   tod: "day",
   autoaim: true,
+  vision: "off",
   blips: [],
   droneX: 0,
   droneZ: 0,
@@ -200,6 +209,10 @@ export const useGameStore = create<GameHud>((set) => ({
   scanMarks: [],
   onPad: false,
   pad: false,
+  threatRel: 0,
+  threatDist: 0,
+  threatLabel: "",
+  nearGoal: false,
   patch: (partial) => {
     set(partial);
     if (
@@ -209,7 +222,8 @@ export const useGameStore = create<GameHud>((set) => ({
       "mode" in partial ||
       "unit" in partial ||
       "tod" in partial ||
-      "autoaim" in partial
+      "autoaim" in partial ||
+      "vision" in partial
     ) {
       persistSettings();
     }

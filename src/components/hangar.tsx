@@ -2,9 +2,11 @@ import type { ReactNode } from "react";
 import { Gauge, Shield, Truck, User, Zap } from "lucide-react";
 import {
   ARMOR_LABEL,
+  VISION_LABEL,
   WEAPONS,
   WEAPON_ORDER,
   expectedDamage,
+  nextVision,
   type GameMode,
   type GroundUnit,
   type WeaponId,
@@ -30,6 +32,7 @@ export function Hangar({ onStart, ready }: Props) {
   const shake = useGameStore((s) => s.shake);
   const tod = useGameStore((s) => s.tod);
   const autoaim = useGameStore((s) => s.autoaim);
+  const vision = useGameStore((s) => s.vision);
   const patch = useGameStore((s) => s.patch);
   const wpn = WEAPONS[weapon];
   const def = MODES[mode];
@@ -201,6 +204,13 @@ export function Hangar({ onStart, ready }: Props) {
               Автоприцел
             </label>
           ) : null}
+          <button
+            type="button"
+            className="rounded-sm border border-border bg-bg px-2 py-0.5 font-mono text-[10px] tracking-widest uppercase text-muted"
+            onClick={() => patch({ vision: nextVision(vision) })}
+          >
+            Оптика · {VISION_LABEL[vision]}
+          </button>
         </div>
 
         <div className="mt-4 rounded-md border border-border bg-bg px-3 py-2.5 short:mt-3">
@@ -233,13 +243,16 @@ export function Hangar({ onStart, ready }: Props) {
                   <span className="text-fg">P</span> — пауза
                 </li>
                 <li>
-                  <span className="text-fg">Геймпад</span> — стики
+                  <span className="text-fg">T</span> — слух
+                </li>
+                <li>
+                  <span className="text-fg">N</span> — тепло / ПНВ
                 </li>
               </ul>
               <p className="mt-2 text-[11px] leading-snug text-subtle coarse:hidden">
                 Вид сзади. Хутор и сад слева, пшеница и кукуруза по грунтовке, подсолнухи, тополя, живые изгороди,
                 пруд с камышом. Грунтовка быстрее пашни — прячьтесь в рощах и кукурузе. Зелёный круг — выход на
-                красную ленту. Ночью горят окна, у пикапа фары.
+                красную ленту. Ночью горят окна и лучи охотников. T — пеленг FPV. N — тепловизор.
               </p>
               <p className="mt-2 hidden text-[11px] leading-snug text-subtle coarse:block">
                 Левый стик — ход и поворот, правый — камера. Бег или газ справа, солдат может присесть.
@@ -270,14 +283,17 @@ export function Hangar({ onStart, ready }: Props) {
                 <li>
                   <span className="text-fg">T</span> — скан
                 </li>
+                <li>
+                  <span className="text-fg">N</span> — тепло / ПНВ
+                </li>
               </ul>
               <p className="mt-2 hidden text-[11px] leading-snug text-subtle coarse:block">
                 Левый стик — полёт, правый — крен. Огонь, скан и подрыв справа.
               </p>
               <p className="mt-2 hidden text-[11px] leading-snug text-subtle coarse:hidden md:block">
                 {arcade
-                  ? "Автоприцел тянет нос на цель в рамке. T — импульс сканера. Геймпад: левый стик полёт, RT огонь, Y скан."
-                  : "Полигон: пшеница, кукуруза, подсолнухи, рощи, тополя, пруд, река и карьер. Скан (T), автоприцел, ветер. Сядьте на площадку или ударьте цель."}
+                  ? "Автоприцел тянет нос на цель в рамке. T — импульс сканера. N — тепловизор / ПНВ. Геймпад: левый стик полёт, RT огонь, Y скан."
+                  : "Полигон: пшеница, кукуруза, подсолнухи, рощи, тополя, пруд, река и карьер. Скан (T), автоприцел, ветер, тепло (N). Сядьте на площадку или ударьте цель."}
               </p>
             </>
           )}

@@ -18,7 +18,7 @@ type Unit = {
 const WAVES: TargetKind[][] = [
   ["infantry", "infantry", "infantry"],
   ["infantry", "jeep", "infantry"],
-  ["jeep", "infantry", "jeep", "infantry"],
+  ["jeep", "truck", "infantry", "infantry"],
 ];
 
 export function createInfiltrators(world: WorldApi, sim: Sim) {
@@ -53,7 +53,7 @@ export function createInfiltrators(world: WorldApi, sim: Sim) {
       kind,
       pos: new THREE.Vector3(x, world.heightAt(x, z), z),
       yaw,
-      speed: kind === "jeep" ? 7.4 : 3.35,
+      speed: kind === "jeep" ? 7.4 : kind === "truck" ? 6.15 : 3.35,
       breached: false,
     });
   }

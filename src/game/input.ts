@@ -12,6 +12,7 @@ export type Actions = {
   pausePress: boolean;
   weaponSlot: 0 | 1 | 2 | null;
   scanPress: boolean;
+  visionPress: boolean;
   assist: boolean;
 };
 
@@ -34,6 +35,7 @@ export type InputController = {
   setTouchBoost: (v: boolean) => void;
   setTouchCrouch: (v: boolean) => void;
   setTouchScan: () => void;
+  setTouchVision: () => void;
   requestLock: () => void;
   isLocked: () => boolean;
   padConnected: () => boolean;
@@ -54,6 +56,7 @@ const GAME_CODES = new Set([
   "KeyG",
   "KeyT",
   "KeyV",
+  "KeyN",
   "Space",
   "ShiftLeft",
   "ControlLeft",
@@ -95,9 +98,11 @@ export function createInput(): InputController {
   let touchBoost = false;
   let touchCrouch = false;
   let touchScan = false;
+  let touchVision = false;
   let host: HTMLElement | null = null;
   let prevPause = false;
   let prevScan = false;
+  let prevVision = false;
   let prevLB = false;
   let prevRB = false;
   let padWeapon = 1 as 0 | 1 | 2;
@@ -177,6 +182,7 @@ export function createInput(): InputController {
     touchBoost = false;
     touchCrouch = false;
     touchScan = false;
+    touchVision = false;
     padOn = false;
   }
 
@@ -191,6 +197,7 @@ export function createInput(): InputController {
     crouch: boolean;
     pause: boolean;
     scan: boolean;
+    vision: boolean;
     slot: 0 | 1 | 2 | null;
   } {
     const empty = {
@@ -204,6 +211,7 @@ export function createInput(): InputController {
       crouch: false,
       pause: false,
       scan: false,
+      vision: false,
       slot: null as 0 | 1 | 2 | null,
     };
     if (typeof navigator === "undefined" || typeof navigator.getGamepads !== "function") {
@@ -237,7 +245,8 @@ export function createInput(): InputController {
     const rb = btn(pad, 5);
     const lt = trig(pad, 6);
     const rt = trig(pad, 7);
-    const start = btn(pad, 8) || btn(pad, 9);
+    const start = btn(pad, 9);
+    const select = btn(pad, 8) || btn(pad, 11);
     const dL = btn(pad, 14);
     const dR = btn(pad, 15);
     const dU = btn(pad, 12);
@@ -267,6 +276,7 @@ export function createInput(): InputController {
       crouch: ground && (b || x),
       pause: start,
       scan: y,
+      vision: select,
       slot,
     };
   }
@@ -310,6 +320,11 @@ export function createInput(): InputController {
     prevScan = scanNow;
     touchScan = false;
 
+    const visionNow = mergedHas("KeyN") || pad.vision || touchVision;
+    const visionPress = visionNow && !prevVision;
+    prevVision = visionNow;
+    touchVision = false;
+
     let weaponSlot: 0 | 1 | 2 | null = null;
     if (mergedHas("Digit1")) weaponSlot = 0;
     else if (mergedHas("Digit2")) weaponSlot = 1;
@@ -332,6 +347,7 @@ export function createInput(): InputController {
       pausePress,
       weaponSlot,
       scanPress,
+      visionPress,
       assist,
     };
   }
@@ -410,6 +426,9 @@ export function createInput(): InputController {
     },
     setTouchScan: () => {
       touchScan = true;
+    },
+    setTouchVision: () => {
+      touchVision = true;
     },
     requestLock,
     isLocked: () => locked,

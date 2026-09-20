@@ -11,6 +11,7 @@ import {
   WORLD_SIZE,
   type Armor,
   type TargetKind,
+  type VisionMode,
   type WeaponId,
 } from "./catalog";
 import { clamp, expDamp, wrapPi } from "./math";
@@ -313,6 +314,32 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
   let scanCd = 0;
   let onPad = false;
   let lockId = 0;
+  let vision: VisionMode = "off";
+
+  function paintHot(t: Target) {
+    t.mesh.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const mat = o.material;
+      if (!(mat instanceof THREE.MeshPhongMaterial)) return;
+      if (t.flash > 0) {
+        mat.emissive.setHex(0xffe8c0);
+        mat.emissiveIntensity = 1.7;
+        return;
+      }
+      if (vision === "thermal") {
+        const hot = t.alive;
+        const infantry = t.kind === "infantry";
+        mat.emissive.setHex(hot ? (infantry ? 0xffcc88 : 0xff4a14) : 0x2a1008);
+        mat.emissiveIntensity = hot ? (infantry ? 2.35 : 1.45) : 0.22;
+      } else if (vision === "nv") {
+        mat.emissive.setHex(0x33ff66);
+        mat.emissiveIntensity = t.alive ? 0.42 : 0.1;
+      } else {
+        mat.emissive.setHex(0x000000);
+        mat.emissiveIntensity = 0;
+      }
+    });
+  }
 
   function drainEvents(): CombatEvent[] {
     const out = events.splice(0, events.length);
@@ -897,14 +924,8 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     flashLight.intensity = Math.max(0, flashLight.intensity - dt * 70);
 
     for (const t of targets) {
-      if (t.flash > 0) {
-        t.flash -= dt;
-        t.mesh.traverse((o) => {
-          if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshLambertMaterial) {
-            o.material.emissive.setHex(t.flash > 0 ? 0x665544 : 0x000000);
-          }
-        });
-      }
+      if (t.flash > 0) t.flash -= dt;
+      paintHot(t);
       if (t.alive) {
         const pulse = scanT > 0
           ? 0.55 + 0.4 * Math.sin(simTime * 14 + t.id)
@@ -1253,6 +1274,10 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     },
     setTargetBeacons: (on: boolean) => {
       for (const t of targets) setBeacons(t, on && t.alive);
+    },
+    setVision: (mode: VisionMode) => {
+      vision = mode;
+      for (const t of targets) paintHot(t);
     },
     getBlips: refreshBlips,
     get weapon() {

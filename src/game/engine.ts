@@ -5,6 +5,8 @@ import {
   DRONE_LIVES,
   ASSAULT_GOAL,
   WEAPON_ORDER,
+  nextVision,
+  type VisionMode,
   type WeaponId,
 } from "./catalog";
 import { createAudio } from "./audio";
@@ -115,6 +117,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   let pendingAfterReplay: "flight" | "dead" | "victory" | "dead-continue" | null = null;
   let fireLatch = false;
   let lastTod: "day" | "night" | null = null;
+  let lastVision: VisionMode | null = null;
 
   const best = Number(localStorage.getItem(BEST_SCORE_KEY) || "0") || 0;
   const bestGround = Number(localStorage.getItem(BEST_GROUND_KEY) || "0") || 0;
@@ -147,10 +150,43 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   }
 
   function applyTod(tod: "day" | "night") {
-    const night = tod === "night";
     lastTod = tod;
+    applyAtmosphere();
+  }
+
+  function applyAtmosphere() {
+    const night = lastTod === "night";
+    const vis = lastVision ?? useGameStore.getState().vision;
     world.setNight(night);
     ground.setNight(night);
+    if (vis === "thermal") {
+      hemi.color.setHex(0x2a1008);
+      hemi.groundColor.setHex(0x080208);
+      hemi.intensity = 0.2;
+      sun.color.setHex(0xff4a12);
+      sun.intensity = 0.14;
+      fill.intensity = 0.02;
+      bounce.intensity = 0;
+      renderer.toneMappingExposure = 0.58;
+      world.setVision("thermal");
+      sim.setVision("thermal");
+      ground.setVision("thermal");
+      return;
+    }
+    if (vis === "nv") {
+      hemi.color.setHex(0x88ffaa);
+      hemi.groundColor.setHex(0x0a1a10);
+      hemi.intensity = 0.55;
+      sun.color.setHex(0x66ff88);
+      sun.intensity = 0.32;
+      fill.intensity = 0.08;
+      bounce.intensity = 0.04;
+      renderer.toneMappingExposure = 1.35;
+      world.setVision("nv");
+      sim.setVision("nv");
+      ground.setVision("nv");
+      return;
+    }
     hemi.color.setHex(night ? 0x8aa0c8 : 0xe4eef6);
     hemi.groundColor.setHex(night ? 0x1a2218 : 0x4e5e3a);
     hemi.intensity = night ? 0.32 : 0.95;
@@ -160,6 +196,9 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     fill.intensity = night ? 0.1 : 0.42;
     bounce.intensity = night ? 0.05 : 0.22;
     renderer.toneMappingExposure = night ? 0.78 : 1.22;
+    world.setVision("off");
+    sim.setVision("off");
+    ground.setVision("off");
   }
 
   function setPhase(phase: "hangar" | "flight" | "pause" | "dead" | "victory" | "replay") {
@@ -456,6 +495,13 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
         audio.rumble(160, 0.55);
       }
       if (e.type === "step") audio.step();
+      if (e.type === "listen") {
+        audio.scan();
+        const th = ground.getThreat();
+        useGameStore.getState().patch({
+          message: th.dist > 0 ? `СЛУХ · FPV ${th.label} ${th.dist.toFixed(0)} м` : "СЛУХ · пусто",
+        });
+      }
       if (e.type === "boom") {
         audio.explode(1.2);
         sim.boomAt(e.x, e.y, e.z, 1.1);
@@ -466,7 +512,9 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
         finish(false);
       }
       if (e.type === "extract") {
-        useGameStore.getState().patch({ score: ground.score, hitFlash: 0.6 });
+        audio.extract();
+        audio.rumble(280, 0.4);
+        useGameStore.getState().patch({ score: ground.score, hitFlash: 0.6, message: "ЛИНИЯ ВЗЯТА" });
         finish(true);
       }
     }
@@ -493,6 +541,13 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
         armor: "soft",
         alive: true,
       });
+      const th = ground.getThreat();
+      const threatRel = th.dist > 0 ? ((th.heading - heading + 540) % 360) - 180 : 0;
+      let gmsg = st.message;
+      if (th.state === "dive") gmsg = `ПИКИРОВАНИЕ · ${th.label} ${th.dist.toFixed(0)} м`;
+      else if (th.state === "search" && th.dist < 80) gmsg = `FPV ${th.label} · ${th.dist.toFixed(0)} м`;
+      else if (ground.goalDist < 28 && ground.player.alive) gmsg = "ВЫХОД НА ЛЕНТУ";
+      else if (gmsg.startsWith("ПИКИРОВАНИЕ") || gmsg.startsWith("FPV ") || gmsg === "ВЫХОД НА ЛЕНТУ") gmsg = "";
       useGameStore.getState().patch({
         lives: ground.player.alive ? 1 : 0,
         battery: 100,
@@ -518,6 +573,11 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
         scanning: 0,
         scanMarks: [],
         onPad: false,
+        threatRel,
+        threatDist: th.dist,
+        threatLabel: th.label,
+        nearGoal: ground.goalDist < 28,
+        message: gmsg,
       });
       return;
     }
@@ -608,10 +668,18 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       infil.setActive(false);
     }
     audio.setMuted(st.muted);
-    if (st.tod !== lastTod) applyTod(st.tod);
     if (st.weapon !== sim.weapon) sim.setWeapon(st.weapon);
     input.setAssist(st.autoaim);
     const actions = input.sample(st.invertY, isGround);
+    if (flying && actions.visionPress) {
+      useGameStore.getState().patch({ vision: nextVision(st.vision) });
+    }
+    const vis = useGameStore.getState().vision;
+    if (st.tod !== lastTod || vis !== lastVision) {
+      lastTod = st.tod;
+      lastVision = vis;
+      applyAtmosphere();
+    }
     const mouse = flying || replaying ? input.consumeMouse() : (input.consumeMouse(), { dx: 0, dy: 0 });
 
     if (replaying) {

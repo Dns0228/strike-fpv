@@ -1,3 +1,22 @@
+export type VisionMode = "off" | "thermal" | "nv";
+
+export const VISION_LABEL: Record<VisionMode, string> = {
+  off: "глаз",
+  thermal: "тепло",
+  nv: "ПНВ",
+};
+
+export function nextVision(v: VisionMode): VisionMode {
+  if (v === "off") return "thermal";
+  if (v === "thermal") return "nv";
+  return "off";
+}
+
+export function parseVision(raw: unknown): VisionMode {
+  if (raw === "thermal" || raw === "nv" || raw === "off") return raw;
+  return "off";
+}
+
 export type Armor = "soft" | "light" | "heavy";
 export type WeaponId = "frag" | "he" | "ap";
 export type GameMode = "free" | "arcade" | "assault";

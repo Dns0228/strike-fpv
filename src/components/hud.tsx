@@ -1,4 +1,4 @@
-import { ARMOR_LABEL, FRONT_Z, ROAD_PATHS, WEAPONS, WEAPON_ORDER, type WeaponId } from "@/game/catalog";
+import { ARMOR_LABEL, FRONT_Z, ROAD_PATHS, VISION_LABEL, WEAPONS, WEAPON_ORDER, type VisionMode, type WeaponId } from "@/game/catalog";
 import { isGroundSeat, MODES } from "@/game/modes";
 import { useGameStore, type RadarBlip } from "@/game/store";
 
@@ -35,6 +35,11 @@ function GroundHud() {
   const message = useGameStore((s) => s.message);
   const unit = useGameStore((s) => s.unit);
   const tod = useGameStore((s) => s.tod);
+  const vision = useGameStore((s) => s.vision);
+  const threatRel = useGameStore((s) => s.threatRel);
+  const threatDist = useGameStore((s) => s.threatDist);
+  const threatLabel = useGameStore((s) => s.threatLabel);
+  const nearGoal = useGameStore((s) => s.nearGoal);
   const yaw = (-heading * Math.PI) / 180;
   const tone = locked ? "text-danger" : detect > 0.45 ? "text-warn" : "text-ok";
   const status = locked ? "ЗАХВАТ FPV" : detect > 0.45 ? "В ЗОНЕ" : conceal > 0.5 ? "УКРЫТИЕ" : "ТИШИНА";
@@ -51,6 +56,7 @@ function GroundHud() {
       {hitFlash > 0.05 ? (
         <div className="absolute inset-0 bg-danger/20" style={{ opacity: hitFlash * 0.5 }} />
       ) : null}
+      <VisionWash mode={vision} />
 
       <header className="absolute left-0 right-0 top-0 flex items-start justify-between gap-3 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] md:p-5 short:p-2 short:pt-[max(0.4rem,env(safe-area-inset-top))]">
         <div>
@@ -58,7 +64,10 @@ function GroundHud() {
             Штурм · {unit === "jeep" ? "пикап" : "солдат"}
           </div>
           <div className={`mt-1 text-xs tabular ${tone}`}>{status}</div>
-          <div className="mt-1 text-[10px] tracking-widest text-hud-dim uppercase">{tod === "night" ? "НОЧЬ" : "ДЕНЬ"}</div>
+          <div className="mt-1 text-[10px] tracking-widest text-hud-dim uppercase">
+            {tod === "night" ? "НОЧЬ" : "ДЕНЬ"}
+            {vision !== "off" ? ` · ${VISION_LABEL[vision]}` : ""}
+          </div>
         </div>
         <div className="flex items-start gap-3">
           <button
@@ -75,7 +84,7 @@ function GroundHud() {
         </div>
       </header>
 
-      <Compass heading={heading} />
+      <Compass heading={heading} threatRel={threatDist > 4 ? threatRel : undefined} />
 
       <div className="absolute left-3 top-1/3 space-y-3 text-[11px] tabular md:left-5 short:top-20 short:left-[max(0.75rem,env(safe-area-inset-left))] short:space-y-2">
         <Readout k="SPD" v={`${speed.toFixed(0)}`} u="м/с" />
@@ -86,6 +95,9 @@ function GroundHud() {
       <div className="absolute right-3 top-1/3 space-y-3 text-right text-[11px] tabular md:right-5 short:top-20 short:right-[max(0.75rem,env(safe-area-inset-right))] short:space-y-2">
         <Readout k="FPV" v={`${hunters}`} u="в воздухе" tone={locked ? "text-danger" : "text-hud"} />
         <Readout k="МАСК." v={`${Math.round(conceal * 100)}`} u="%" tone={conceal > 0.5 ? "text-ok" : "text-hud"} />
+        {threatDist > 4 ? (
+          <Readout k="ПЕЛЕНГ" v={threatLabel} u={`${threatDist.toFixed(0)}м`} tone={locked ? "text-danger" : "text-warn"} />
+        ) : null}
       </div>
 
       <Minimap blips={blips} x={droneX} z={droneZ} yaw={yaw} frontZ={FRONT_Z} />
@@ -97,9 +109,10 @@ function GroundHud() {
             style={{ width: `${Math.min(100, detect * 100)}%` }}
           />
         </div>
+        {nearGoal ? <p className="text-[10px] tracking-[0.2em] text-ok uppercase">Выход на ленту</p> : null}
         {message ? <p className="text-[11px] tracking-wide text-muted">{message}</p> : null}
         <p className="hidden text-[10px] tracking-wide text-subtle coarse:hidden md:block">
-          W ход · A/D поворот · мышь камера · пробел бег · Ctrl присесть
+          W ход · A/D поворот · мышь камера · пробел бег · T слух · N оптика
         </p>
         <p className="hidden text-[10px] tracking-wide text-subtle coarse:block">
           Левый стик — ход · правый — камера · Бег / Сесть
@@ -140,6 +153,7 @@ function FpvHud() {
   const onPad = useGameStore((s) => s.onPad);
   const pad = useGameStore((s) => s.pad);
   const autoaim = useGameStore((s) => s.autoaim);
+  const vision = useGameStore((s) => s.vision);
 
   const batTone = battery < 18 ? "text-danger" : battery < 40 ? "text-warn" : "text-hud";
   const yaw = (-heading * Math.PI) / 180;
@@ -161,6 +175,7 @@ function FpvHud() {
       ) : null}
       <div className={`fpv-scan absolute inset-0 ${scanning > 0.05 ? "fpv-scan-hot" : ""}`} />
       {scanning > 0.05 ? <div className="fpv-scan-flash absolute inset-0" /> : null}
+      <VisionWash mode={vision} />
 
       <div className="absolute left-1/2 top-1/2 size-8 -translate-x-1/2 -translate-y-1/2">
         <span className="absolute left-1/2 top-0 h-2 w-px -translate-x-1/2 bg-hud" />
@@ -182,6 +197,7 @@ function FpvHud() {
             <span className="ml-2 text-hud-dim">{tod === "night" ? "НОЧЬ" : "ДЕНЬ"}</span>
             {pad ? <span className="ml-2 text-ok">PAD</span> : null}
             {autoaim ? <span className="ml-2 text-hud-dim">АВТО</span> : null}
+            {vision !== "off" ? <span className="ml-2 text-warn">{VISION_LABEL[vision]}</span> : null}
           </div>
         </div>
         <div className="flex items-start gap-3">
@@ -279,7 +295,7 @@ function FpvHud() {
           <p className="text-[10px] tracking-[0.2em] text-ok uppercase">Площадка</p>
         ) : null}
         <p className="hidden text-[10px] tracking-wide text-subtle md:block coarse:hidden">
-          T скан · {autoaim ? "автоприцел вкл" : "автоприцел выкл"}
+          T скан · N тепло/ПНВ · {autoaim ? "автоприцел вкл" : "автоприцел выкл"}
           {pad ? " · геймпад" : ""}
         </p>
         <div className="flex gap-1">
@@ -305,7 +321,17 @@ function FpvHud() {
   );
 }
 
-function Compass({ heading, windRel, gust }: { heading: number; windRel?: number; gust?: number }) {
+function Compass({
+  heading,
+  windRel,
+  gust,
+  threatRel,
+}: {
+  heading: number;
+  windRel?: number;
+  gust?: number;
+  threatRel?: number;
+}) {
   return (
     <div className="absolute left-1/2 top-14 w-52 -translate-x-1/2 overflow-hidden md:top-16 md:w-72 short:top-10 short:w-44">
       <div className="relative h-7 border-b border-hud/35">
@@ -334,6 +360,14 @@ function Compass({ heading, windRel, gust }: { heading: number; windRel?: number
             style={{ left: `${50 + Math.max(-42, Math.min(42, windRel * 0.72))}%` }}
           >
             {gust && gust > 0.35 ? "▲" : "△"}
+          </div>
+        ) : null}
+        {threatRel != null ? (
+          <div
+            className="absolute top-0 -translate-x-1/2 text-[9px] text-danger"
+            style={{ left: `${50 + Math.max(-42, Math.min(42, threatRel * 0.72))}%` }}
+          >
+            ▼
           </div>
         ) : null}
       </div>
@@ -452,6 +486,15 @@ function Minimap({
       })}
       <span className="absolute left-1/2 top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-fg bg-fg" />
     </div>
+  );
+}
+
+function VisionWash({ mode }: { mode: VisionMode }) {
+  if (mode === "off") return null;
+  return (
+    <div
+      className={`pointer-events-none absolute inset-0 ${mode === "thermal" ? "vision-thermal" : "vision-nv"}`}
+    />
   );
 }
 

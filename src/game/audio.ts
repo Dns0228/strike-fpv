@@ -12,6 +12,7 @@ export type GameAudio = {
   warning: () => void;
   crash: () => void;
   scan: () => void;
+  extract: () => void;
   rumble: (ms: number, strong?: number) => void;
   dispose: () => void;
 };
@@ -299,6 +300,31 @@ export function createAudio(): GameAudio {
       osc2.start(t);
       osc2.stop(t + 0.22);
       rumblePad(90, 0.2);
+    },
+    extract: () => {
+      const c = ensure();
+      const t = c.currentTime;
+      const osc = c.createOscillator();
+      const g = c.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(420, t);
+      osc.frequency.exponentialRampToValueAtTime(880, t + 0.18);
+      env(g, t, 0.01, 0.35, 0.16);
+      osc.connect(g);
+      g.connect(sfx!);
+      osc.start(t);
+      osc.stop(t + 0.4);
+      const osc2 = c.createOscillator();
+      const g2 = c.createGain();
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(220, t);
+      osc2.frequency.exponentialRampToValueAtTime(110, t + 0.4);
+      env(g2, t, 0.02, 0.42, 0.14);
+      osc2.connect(g2);
+      g2.connect(sfx!);
+      osc2.start(t);
+      osc2.stop(t + 0.45);
+      rumblePad(220, 0.35);
     },
     rumble: (ms, strong = 0.45) => rumblePad(ms, strong),
     dispose: () => {

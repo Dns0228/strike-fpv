@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { EXTRACTION, GROUND_START, WORLD_SIZE, type GroundUnit } from "./catalog";
+import { EXTRACTION, GROUND_START, WORLD_SIZE, type GroundUnit, type VisionMode } from "./catalog";
 import type { Actions } from "./input";
 import { clamp, expDamp } from "./math";
 import type { WorldApi } from "./world";
@@ -12,7 +12,8 @@ export type GroundEvent =
   | { type: "boom"; x: number; y: number; z: number }
   | { type: "hit" }
   | { type: "extract" }
-  | { type: "step" };
+  | { type: "step" }
+  | { type: "listen" };
 
 type HunterState = "patrol" | "search" | "dive" | "dead";
 
@@ -27,6 +28,8 @@ type Hunter = {
   lock: number;
   deadT: number;
   mesh: THREE.Group;
+  lamp: THREE.SpotLight;
+  lampTgt: THREE.Object3D;
 };
 
 const WAYPOINTS: Array<[number, number, number]> = [
@@ -91,6 +94,10 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
       }
     });
     scene.add(mesh);
+    const lamp = new THREE.SpotLight(0xffe4b8, 0, 72, 0.34, 0.55, 1.15);
+    const lampTgt = new THREE.Object3D();
+    scene.add(lamp, lampTgt);
+    lamp.target = lampTgt;
     const wp = WAYPOINTS[i % WAYPOINTS.length];
     hunters.push({
       id: i,
@@ -103,6 +110,8 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
       lock: 0,
       deadT: 0,
       mesh,
+      lamp,
+      lampTgt,
     });
   }
 
@@ -171,10 +180,31 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
     return { line, pos, n };
   });
 
+  const EXIT_N = 48;
+  const exitPos = new Float32Array(EXIT_N * 3);
+  const exitLife = new Float32Array(EXIT_N);
+  const exitGeo = new THREE.BufferGeometry();
+  exitGeo.setAttribute("position", new THREE.BufferAttribute(exitPos, 3));
+  const exitMat = new THREE.PointsMaterial({
+    color: 0x7d9a6e,
+    size: 0.85,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  const exitSmoke = new THREE.Points(exitGeo, exitMat);
+  scene.add(exitSmoke);
+  for (let i = 0; i < EXIT_N; i++) exitPos[i * 3 + 1] = -80;
+
   let nightMode = false;
+  let vision: VisionMode = "off";
   let bodyRoll = 0;
   let stepAcc = 0;
   let dustAcc = 0;
+  let listenT = 0;
+  let listenCd = 0;
+  let exitAcc = 0;
 
   let active = false;
   let time = 0;
@@ -193,8 +223,12 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
     playerGrp.visible = on;
     goal.visible = on;
     dust.visible = on;
+    exitSmoke.visible = on;
     lamp.intensity = on && nightMode ? (unit === "jeep" ? 2.7 : 0.35) : 0;
-    for (const h of hunters) h.mesh.visible = on && h.state !== "dead";
+    for (const h of hunters) {
+      h.mesh.visible = on && h.state !== "dead";
+      if (!on) h.lamp.intensity = 0;
+    }
     for (let i = 0; i < trails.length; i++) {
       trails[i].line.visible = on && hunters[i].state !== "dead";
     }
@@ -354,12 +388,60 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
     dustMat.opacity = nightMode ? 0.22 : 0.42;
   }
 
+  function puffExit(n: number, burst = false) {
+    let spawned = 0;
+    const gy = world.heightAt(EXTRACTION.x, EXTRACTION.z);
+    for (let i = 0; i < EXIT_N && spawned < n; i++) {
+      if (exitLife[i] > 0.05) continue;
+      exitLife[i] = burst ? 1.1 + Math.random() * 0.6 : 0.7 + Math.random() * 0.5;
+      const a = Math.random() * Math.PI * 2;
+      const r = burst ? Math.random() * 4 : Math.random() * 5.5;
+      exitPos[i * 3] = EXTRACTION.x + Math.cos(a) * r;
+      exitPos[i * 3 + 1] = gy + 0.3 + Math.random() * 0.8;
+      exitPos[i * 3 + 2] = EXTRACTION.z + Math.sin(a) * r;
+      spawned++;
+    }
+  }
+
+  function stepExit(dt: number) {
+    for (let i = 0; i < EXIT_N; i++) {
+      if (exitLife[i] <= 0) continue;
+      exitLife[i] -= dt;
+      exitPos[i * 3 + 1] += dt * 1.6;
+      if (exitLife[i] <= 0) exitPos[i * 3 + 1] = -80;
+    }
+    (exitGeo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    const close = Math.hypot(player.pos.x - EXTRACTION.x, player.pos.z - EXTRACTION.z) < 36;
+    exitMat.opacity = (close ? 0.62 : 0.22) * (vision === "thermal" ? 1.3 : 1);
+    exitMat.color.setHex(vision === "thermal" ? 0xff8844 : vision === "nv" ? 0x66ff88 : 0x7d9a6e);
+  }
+
+  function paintHunter(h: Hunter) {
+    h.mesh.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const mat = o.material;
+      if (!(mat instanceof THREE.MeshPhongMaterial)) return;
+      if (vision === "thermal") {
+        mat.emissive.setHex(h.state === "dead" ? 0x2a1008 : 0xff4a18);
+        mat.emissiveIntensity = h.state === "dead" ? 0.2 : 2.1;
+      } else if (vision === "nv") {
+        mat.emissive.setHex(0x33ff66);
+        mat.emissiveIntensity = 0.55;
+      } else {
+        mat.emissive.setHex(0x000000);
+        mat.emissiveIntensity = 0;
+      }
+    });
+  }
+
   function stepTrails() {
     for (let i = 0; i < hunters.length; i++) {
       const h = hunters[i];
       const tr = trails[i];
       const dead = h.state === "dead";
+      const mat = tr.line.material as THREE.LineBasicMaterial;
       tr.line.visible = active && !dead;
+      mat.opacity = listenT > 0 ? 0.92 : 0.55;
       if (dead) continue;
       for (let k = tr.n - 1; k > 0; k--) {
         tr.pos[k * 3] = tr.pos[(k - 1) * 3];
@@ -377,6 +459,7 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
     if (h.state === "dead") {
       h.deadT -= dt;
       h.mesh.visible = false;
+      h.lamp.intensity = 0;
       if (h.deadT <= 0) {
         const wp = WAYPOINTS[h.wp % WAYPOINTS.length];
         h.pos.set(wp[0] + 8, 26, wp[2] - 6);
@@ -468,6 +551,29 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
     h.mesh.traverse((o) => {
       if (o.userData.prop) o.rotation.z += dt * 28;
     });
+    const hx2 = -Math.sin(h.yaw);
+    const hz2 = -Math.cos(h.yaw);
+    h.lamp.position.copy(h.pos);
+    h.lampTgt.position.set(h.pos.x + hx2 * 22, world.heightAt(h.pos.x, h.pos.z) + 0.4, h.pos.z + hz2 * 22);
+    const dead = h.state === "dead";
+    const dive = h.state === "dive";
+    const search = h.state === "search";
+    h.lamp.color.setHex(dive ? 0xff5533 : vision === "nv" ? 0x88ffaa : vision === "thermal" ? 0xff6622 : 0xffe4b8);
+    h.lamp.angle = dive ? 0.2 : search ? 0.28 : 0.36;
+    h.lamp.intensity = !active || dead
+      ? 0
+      : dive
+        ? 3.6
+        : search
+          ? nightMode || vision !== "off"
+            ? 2.7
+            : 1.15
+          : nightMode
+            ? 1.45
+            : vision !== "off"
+              ? 0.55
+              : 0.16;
+    if (listenT > 0) h.lamp.intensity *= 1.35;
   }
 
   function desiredCam() {
@@ -509,6 +615,13 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
       return;
     }
     time += dt;
+    listenT = Math.max(0, listenT - dt);
+    listenCd = Math.max(0, listenCd - dt);
+    if (actions.scanPress && listenCd <= 0) {
+      listenT = 1.8;
+      listenCd = 5.5;
+      events.push({ type: "listen" });
+    }
     lookYaw -= mouse.dx * 0.0024;
     lookPitch += (invertY ? -mouse.dy : mouse.dy) * 0.002;
     lookYaw += actions.roll * 2.15 * dt;
@@ -522,6 +635,9 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
     const sc = player.crouch && unit === "soldier" ? 0.82 : 1;
     soldierMesh.scale.set(1, sc, 1);
     playerGrp.position.copy(player.pos);
+    if (unit === "jeep") {
+      playerGrp.position.y += Math.sin(time * (8 + spdFactor() * 6)) * 0.07 * spdFactor();
+    }
     playerGrp.rotation.y = player.yaw + Math.PI;
     animate(dt);
 
@@ -544,8 +660,20 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
     stepDust(dt);
     lamp.intensity = nightMode ? (unit === "jeep" ? 2.7 : 0.35) : 0;
 
-    for (const h of hunters) stepHunter(h, dt);
+    for (const h of hunters) {
+      stepHunter(h, dt);
+      paintHunter(h);
+    }
     stepTrails();
+    const gd = Math.hypot(player.pos.x - EXTRACTION.x, player.pos.z - EXTRACTION.z);
+    exitAcc += dt;
+    if (gd < 36 && exitAcc > 0.11) {
+      exitAcc = 0;
+      puffExit(gd < 18 ? 3 : 1);
+    }
+    stepExit(dt);
+    flag.rotation.y = Math.sin(time * 3.2) * 0.35;
+    ring.scale.setScalar(gd < 28 ? 1.08 + 0.06 * Math.sin(time * 6) : 1);
 
     const maxLock = hunters.reduce((m, h) => Math.max(m, h.state === "dead" ? 0 : h.lock), 0);
     const diving = hunters.some((h) => h.state === "dive");
@@ -556,10 +684,10 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
       events.push({ type: "lock" });
     }
 
-    const gd = Math.hypot(player.pos.x - EXTRACTION.x, player.pos.z - EXTRACTION.z);
     if (gd < EXTRACTION.r && player.alive) {
       const stealth = player.spottedOnce ? 0 : 400;
       score = Math.max(score, Math.round(900 + stealth + Math.max(0, 180 - time) * 4));
+      puffExit(18, true);
       events.push({ type: "extract" });
       player.alive = false;
     }
@@ -587,8 +715,8 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
       cam.position.y += (Math.random() - 0.5) * shake * 0.25;
     }
     cam.lookAt(camTgtS);
-    const fov = unit === "jeep" ? 52 : 50;
-    if (cam.fov !== fov) {
+    const fov = (unit === "jeep" ? 52 : 50) + spdFactor() * (unit === "jeep" ? 8 : 0);
+    if (Math.abs(cam.fov - fov) > 0.4) {
       cam.fov = fov;
       cam.updateProjectionMatrix();
     }
@@ -633,17 +761,52 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
       lamp.intensity = on && active ? (unit === "jeep" ? 2.7 : 0.35) : 0;
       dustMat.color.setHex(on ? 0x8a7a62 : 0xc2b08a);
     },
+    setVision: (mode: VisionMode) => {
+      vision = mode;
+      for (const h of hunters) paintHunter(h);
+    },
+    getThreat: () => {
+      let best: Hunter | null = null;
+      let bestW = 1e9;
+      for (const h of hunters) {
+        if (h.state === "dead") continue;
+        const d = Math.hypot(h.pos.x - player.pos.x, h.pos.z - player.pos.z);
+        const w = h.state === "dive" ? d * 0.25 : h.state === "search" ? d * 0.55 : d;
+        if (w < bestW) {
+          bestW = w;
+          best = h;
+        }
+      }
+      if (!best) return { heading: 0, dist: 0, state: "none" as const, label: "" };
+      const dx = best.pos.x - player.pos.x;
+      const dz = best.pos.z - player.pos.z;
+      const hyaw = Math.atan2(-dx, -dz);
+      const rel = Math.atan2(Math.sin(hyaw - player.yaw), Math.cos(hyaw - player.yaw));
+      const relDeg = (rel * 180) / Math.PI;
+      const abs = Math.abs(relDeg);
+      const label = abs < 32 ? "спереди" : abs > 140 ? "сзади" : relDeg > 0 ? "слева" : "справа";
+      return {
+        heading: ((-hyaw * 180) / Math.PI + 36000) % 360,
+        dist: Math.hypot(dx, dz),
+        state: best.state,
+        label,
+      };
+    },
     drain,
     getYaw: () => player.yaw,
     getSpeed: () => Math.abs(player.speed),
     dispose: () => {
-      scene.remove(playerGrp, goal, dust);
-      for (const h of hunters) scene.remove(h.mesh);
+      scene.remove(playerGrp, goal, dust, exitSmoke);
+      for (const h of hunters) {
+        scene.remove(h.mesh, h.lamp, h.lampTgt);
+      }
       for (const tr of trails) scene.remove(tr.line);
       ringGeo.dispose();
       ringMat.dispose();
       dustGeo.dispose();
       dustMat.dispose();
+      exitGeo.dispose();
+      exitMat.dispose();
     },
   };
 }

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { VISION_LABEL, nextVision } from "@/game/catalog";
 import { isGroundSeat } from "@/game/modes";
 import { useGameStore } from "@/game/store";
 
@@ -20,6 +21,7 @@ export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
   const muted = useGameStore((s) => s.muted);
   const tod = useGameStore((s) => s.tod);
   const autoaim = useGameStore((s) => s.autoaim);
+  const vision = useGameStore((s) => s.vision);
   const wave = useGameStore((s) => s.wave);
   const breaches = useGameStore((s) => s.breaches);
   const patch = useGameStore((s) => s.patch);
@@ -123,6 +125,15 @@ export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
             />
             Автоприцел
           </label>
+        ) : null}
+        {paused ? (
+          <button
+            type="button"
+            className="mt-3 rounded-sm border border-border bg-bg px-2 py-1 font-mono text-[10px] tracking-widest uppercase text-muted"
+            onClick={() => patch({ vision: nextVision(vision) })}
+          >
+            Оптика · {VISION_LABEL[vision]}
+          </button>
         ) : null}
 
         <div className="mt-5 flex flex-col gap-2">

@@ -100,6 +100,22 @@
     pointer-events: none;
     animation: scan-pulse 0.9s ease-out;
   }
+
+  .vision-thermal {
+    background:
+      radial-gradient(ellipse at center, transparent 40%, #2a0804cc 100%),
+      repeating-linear-gradient(to bottom, transparent 0 2px, #ff6a2214 3px);
+    mix-blend-mode: color;
+    pointer-events: none;
+  }
+
+  .vision-nv {
+    background:
+      radial-gradient(ellipse at center, transparent 38%, #031208e0 100%),
+      repeating-linear-gradient(to bottom, transparent 0 2px, #33ff6612 3px);
+    mix-blend-mode: overlay;
+    pointer-events: none;
+  }
 }
 
 @keyframes rec-blink {

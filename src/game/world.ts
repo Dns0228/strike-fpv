@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { FRONT_Z, ROAD_PATHS, TARGETS, WORLD_SIZE, type Armor, type TargetKind } from "./catalog";
+import { FRONT_Z, ROAD_PATHS, TARGETS, WORLD_SIZE, type Armor, type TargetKind, type VisionMode } from "./catalog";
 import { fbm, hash2, lerp } from "./math";
 
 export type Spawn = {
@@ -21,6 +21,7 @@ export type WorldApi = {
   roads: Array<Array<[number, number]>>;
   tick: (t: number, camera: THREE.Camera) => void;
   setNight: (on: boolean) => void;
+  setVision: (mode: VisionMode) => void;
   getWind: () => { x: number; z: number; gust: number };
   dispose: () => void;
 };
@@ -1376,11 +1377,43 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
     sun.visible = !on;
     sunGlow.visible = !on;
     moon.visible = on;
+    moonMat.color.setHex(0xdce6f0);
     cloudMat.opacity = on ? 0.28 : 0.68;
     cloudMat.color.setHex(on ? 0x8899aa : 0xffffff);
     boxMat.pane.emissive.setHex(on ? 0xc4a05a : 0x1c2418);
     boxMat.pane.emissiveIntensity = on ? 1.45 : 0.18;
     birdMat.color.setHex(on ? 0x0a0c10 : 0x1c1e18);
+  }
+
+  function setVision(mode: VisionMode) {
+    if (mode === "off") return;
+    if (mode === "thermal") {
+      scene.fog = new THREE.Fog(0x0c0406, 14, 155);
+      scene.background = new THREE.Color(0x0c0406);
+      skyMat.color.setHex(0x1a0806);
+      sun.visible = false;
+      sunGlow.visible = false;
+      moon.visible = true;
+      moonMat.color.setHex(0xff6622);
+      cloudMat.opacity = 0.12;
+      cloudMat.color.setHex(0x4a2010);
+      boxMat.pane.emissive.setHex(0xff8844);
+      boxMat.pane.emissiveIntensity = 2.4;
+      birdMat.color.setHex(0xff3310);
+      return;
+    }
+    scene.fog = new THREE.Fog(0x031208, 22, 210);
+    scene.background = new THREE.Color(0x031208);
+    skyMat.color.setHex(0x071a0e);
+    sun.visible = false;
+    sunGlow.visible = false;
+    moon.visible = true;
+    moonMat.color.setHex(0xb8ffc4);
+    cloudMat.opacity = 0.2;
+    cloudMat.color.setHex(0x1a3a22);
+    boxMat.pane.emissive.setHex(0x66ff88);
+    boxMat.pane.emissiveIntensity = 1.8;
+    birdMat.color.setHex(0x33ff66);
   }
 
   return {
@@ -1395,6 +1428,7 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
     roads: ROADS,
     tick,
     setNight,
+    setVision,
     getWind,
     dispose: () => {
       scene.remove(group);
