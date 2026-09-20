@@ -11,6 +11,8 @@ export type Actions = {
   crouch: boolean;
   pausePress: boolean;
   weaponSlot: 0 | 1 | 2 | null;
+  scanPress: boolean;
+  assist: boolean;
 };
 
 type Stick = { x: number; y: number; active: boolean; pointerId: number | null };
@@ -18,10 +20,11 @@ type Stick = { x: number; y: number; active: boolean; pointerId: number | null }
 export type InputController = {
   attach: (el: HTMLElement) => void;
   detach: () => void;
-  sample: (invertY: boolean) => Actions;
+  sample: (invertY: boolean, ground?: boolean) => Actions;
   consumeMouse: () => { dx: number; dy: number };
   setKeys: (codes: string[]) => void;
   setSteer: (v: number) => void;
+  setAssist: (v: boolean) => void;
   leftStick: Stick;
   rightStick: Stick;
   setLeftStick: (x: number, y: number, active: boolean) => void;
@@ -30,8 +33,10 @@ export type InputController = {
   setTouchDetonate: (v: boolean) => void;
   setTouchBoost: (v: boolean) => void;
   setTouchCrouch: (v: boolean) => void;
+  setTouchScan: () => void;
   requestLock: () => void;
   isLocked: () => boolean;
+  padConnected: () => boolean;
   keys: Set<string>;
 };
 
@@ -47,6 +52,8 @@ const GAME_CODES = new Set([
   "KeyC",
   "KeyX",
   "KeyG",
+  "KeyT",
+  "KeyV",
   "Space",
   "ShiftLeft",
   "ControlLeft",
@@ -67,6 +74,14 @@ function isCoarse(): boolean {
   return window.matchMedia("(pointer: coarse)").matches || window.matchMedia("(hover: none)").matches;
 }
 
+function btn(pad: Gamepad, i: number): boolean {
+  return !!pad.buttons[i]?.pressed;
+}
+
+function trig(pad: Gamepad, i: number): number {
+  return pad.buttons[i]?.value ?? 0;
+}
+
 export function createInput(): InputController {
   const keys = new Set<string>();
   const synthetic = new Set<string>();
@@ -79,8 +94,15 @@ export function createInput(): InputController {
   let touchDetonate = false;
   let touchBoost = false;
   let touchCrouch = false;
+  let touchScan = false;
   let host: HTMLElement | null = null;
   let prevPause = false;
+  let prevScan = false;
+  let prevLB = false;
+  let prevRB = false;
+  let padWeapon = 1 as 0 | 1 | 2;
+  let padOn = false;
+  let assist = true;
 
   const leftStick: Stick = { x: 0, y: 0, active: false, pointerId: null };
   const rightStick: Stick = { x: 0, y: 0, active: false, pointerId: null };
@@ -154,59 +176,163 @@ export function createInput(): InputController {
     touchDetonate = false;
     touchBoost = false;
     touchCrouch = false;
+    touchScan = false;
+    padOn = false;
   }
 
-  function sample(invertY: boolean): Actions {
+  function readPad(ground: boolean): {
+    lx: number;
+    ly: number;
+    rx: number;
+    ry: number;
+    fire: boolean;
+    boost: boolean;
+    detonate: boolean;
+    crouch: boolean;
+    pause: boolean;
+    scan: boolean;
+    slot: 0 | 1 | 2 | null;
+  } {
+    const empty = {
+      lx: 0,
+      ly: 0,
+      rx: 0,
+      ry: 0,
+      fire: false,
+      boost: false,
+      detonate: false,
+      crouch: false,
+      pause: false,
+      scan: false,
+      slot: null as 0 | 1 | 2 | null,
+    };
+    if (typeof navigator === "undefined" || typeof navigator.getGamepads !== "function") {
+      padOn = false;
+      return empty;
+    }
+    let pad: Gamepad | null = null;
+    try {
+      const list = navigator.getGamepads();
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        if (p && p.connected) {
+          pad = p;
+          break;
+        }
+      }
+    } catch {
+      padOn = false;
+      return empty;
+    }
+    padOn = !!pad;
+    if (!pad) return empty;
+
+    const l = radialDeadzone(pad.axes[0] || 0, pad.axes[1] || 0, 0.18);
+    const r = radialDeadzone(pad.axes[2] || 0, pad.axes[3] || 0, 0.18);
+    const a = btn(pad, 0);
+    const b = btn(pad, 1);
+    const x = btn(pad, 2);
+    const y = btn(pad, 3);
+    const lb = btn(pad, 4);
+    const rb = btn(pad, 5);
+    const lt = trig(pad, 6);
+    const rt = trig(pad, 7);
+    const start = btn(pad, 8) || btn(pad, 9);
+    const dL = btn(pad, 14);
+    const dR = btn(pad, 15);
+    const dU = btn(pad, 12);
+
+    let slot: 0 | 1 | 2 | null = null;
+    if (dU) slot = 1;
+    else if (dL) slot = 0;
+    else if (dR) slot = 2;
+    else if (lb && !prevLB) {
+      padWeapon = ((padWeapon + 2) % 3) as 0 | 1 | 2;
+      slot = padWeapon;
+    } else if (rb && !prevRB) {
+      padWeapon = ((padWeapon + 1) % 3) as 0 | 1 | 2;
+      slot = padWeapon;
+    }
+    prevLB = lb;
+    prevRB = rb;
+
+    return {
+      lx: l.x,
+      ly: -l.y,
+      rx: r.x,
+      ry: -r.y,
+      fire: ground ? false : a || rt > 0.35,
+      boost: ground ? a || lt > 0.35 || rt > 0.35 : lt > 0.35,
+      detonate: !ground && (b || x),
+      crouch: ground && (b || x),
+      pause: start,
+      scan: y,
+      slot,
+    };
+  }
+
+  function sample(invertY: boolean, ground = false): Actions {
+    const pad = readPad(ground);
+
     let throttle = 0;
     if (mergedHas("KeyW")) throttle += 1;
     if (mergedHas("KeyS")) throttle -= 1;
     if (mergedHas("KeyR") || mergedHas("Space")) throttle += 0.35;
     if (mergedHas("KeyF") || mergedHas("KeyC") || mergedHas("ControlLeft")) throttle -= 0.35;
-    throttle += leftStick.y;
+    throttle += leftStick.y + pad.ly;
     throttle = Math.max(-1, Math.min(1, throttle));
 
     let yaw = 0;
     if (mergedHas("KeyA")) yaw += 1;
     if (mergedHas("KeyD")) yaw -= 1;
-    yaw -= leftStick.x;
+    yaw -= leftStick.x + pad.lx;
     if (steerOverride !== null) yaw = steerOverride;
     yaw = Math.max(-1, Math.min(1, yaw));
 
     let pitch = 0;
     if (mergedHas("ArrowUp")) pitch -= 1;
     if (mergedHas("ArrowDown")) pitch += 1;
-    pitch -= rightStick.y * (invertY ? -1 : 1);
+    pitch -= (rightStick.y + pad.ry) * (invertY ? -1 : 1);
     pitch = Math.max(-1, Math.min(1, pitch));
 
     let roll = 0;
     if (mergedHas("ArrowLeft") || mergedHas("KeyQ")) roll += 1;
     if (mergedHas("ArrowRight") || mergedHas("KeyE")) roll -= 1;
-    roll -= rightStick.x;
+    roll -= rightStick.x + pad.rx;
     roll = Math.max(-1, Math.min(1, roll));
 
-    const pauseNow = mergedHas("KeyP") || mergedHas("Enter") || mergedHas("Escape");
+    const pauseNow = mergedHas("KeyP") || mergedHas("Enter") || mergedHas("Escape") || pad.pause;
     const pausePress = pauseNow && !prevPause;
     prevPause = pauseNow;
+
+    const scanNow = mergedHas("KeyT") || mergedHas("KeyV") || pad.scan || touchScan;
+    const scanPress = scanNow && !prevScan;
+    prevScan = scanNow;
+    touchScan = false;
 
     let weaponSlot: 0 | 1 | 2 | null = null;
     if (mergedHas("Digit1")) weaponSlot = 0;
     else if (mergedHas("Digit2")) weaponSlot = 1;
     else if (mergedHas("Digit3")) weaponSlot = 2;
+    else if (pad.slot !== null) weaponSlot = pad.slot;
+    if (weaponSlot !== null) padWeapon = weaponSlot;
 
-    const fire = fireHeld || touchFire || mergedHas("ShiftLeft");
-    const detonate = touchDetonate || mergedHas("KeyX") || mergedHas("KeyG");
+    const fire = fireHeld || touchFire || mergedHas("ShiftLeft") || pad.fire;
+    const detonate = touchDetonate || mergedHas("KeyX") || mergedHas("KeyG") || pad.detonate;
 
     return {
       throttle,
       yaw,
       pitch,
       roll,
-      boost: mergedHas("Space") || touchBoost,
+      boost: mergedHas("Space") || touchBoost || pad.boost,
       fire,
       detonate,
-      crouch: mergedHas("KeyC") || mergedHas("ControlLeft") || touchCrouch,
+      crouch: mergedHas("KeyC") || mergedHas("ControlLeft") || touchCrouch || pad.crouch,
       pausePress,
       weaponSlot,
+      scanPress,
+      assist,
     };
   }
 
@@ -245,6 +371,9 @@ export function createInput(): InputController {
     setSteer: (v) => {
       steerOverride = v;
     },
+    setAssist: (v) => {
+      assist = v;
+    },
     leftStick,
     rightStick,
     setLeftStick: (x, y, active) => {
@@ -279,8 +408,12 @@ export function createInput(): InputController {
     setTouchCrouch: (v) => {
       touchCrouch = v;
     },
+    setTouchScan: () => {
+      touchScan = true;
+    },
     requestLock,
     isLocked: () => locked,
+    padConnected: () => padOn,
     keys,
   };
 }

@@ -29,6 +29,7 @@ export function Hangar({ onStart, ready }: Props) {
   const muted = useGameStore((s) => s.muted);
   const shake = useGameStore((s) => s.shake);
   const tod = useGameStore((s) => s.tod);
+  const autoaim = useGameStore((s) => s.autoaim);
   const patch = useGameStore((s) => s.patch);
   const wpn = WEAPONS[weapon];
   const def = MODES[mode];
@@ -188,6 +189,18 @@ export function Hangar({ onStart, ready }: Props) {
             />
             Ночь
           </label>
+          {!ground ? (
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={autoaim}
+                onChange={(e) => patch({ autoaim: e.target.checked })}
+                className="size-3.5 accent-hud"
+                suppressHydrationWarning
+              />
+              Автоприцел
+            </label>
+          ) : null}
         </div>
 
         <div className="mt-4 rounded-md border border-border bg-bg px-3 py-2.5 short:mt-3">
@@ -218,6 +231,9 @@ export function Hangar({ onStart, ready }: Props) {
                 )}
                 <li>
                   <span className="text-fg">P</span> — пауза
+                </li>
+                <li>
+                  <span className="text-fg">Геймпад</span> — стики
                 </li>
               </ul>
               <p className="mt-2 text-[11px] leading-snug text-subtle coarse:hidden">
@@ -251,14 +267,17 @@ export function Hangar({ onStart, ready }: Props) {
                 <li>
                   <span className="text-fg">X</span> — подрыв
                 </li>
+                <li>
+                  <span className="text-fg">T</span> — скан
+                </li>
               </ul>
               <p className="mt-2 hidden text-[11px] leading-snug text-subtle coarse:block">
-                Левый стик — полёт, правый — крен. Огонь и подрыв справа.
+                Левый стик — полёт, правый — крен. Огонь, скан и подрыв справа.
               </p>
               <p className="mt-2 hidden text-[11px] leading-snug text-subtle coarse:hidden md:block">
                 {arcade
-                  ? "Не дайте пехоте пересечь красную ленту. Три волны, три прорыва — и линия падёт."
-                  : "Полигон: пшеница, кукуруза, подсолнухи, рощи, тополя, пруд, река и карьер. Сядьте на площадку или ударьте цель. Ночь — в ангаре."}
+                  ? "Автоприцел тянет нос на цель в рамке. T — импульс сканера. Геймпад: левый стик полёт, RT огонь, Y скан."
+                  : "Полигон: пшеница, кукуруза, подсолнухи, рощи, тополя, пруд, река и карьер. Скан (T), автоприцел, ветер. Сядьте на площадку или ударьте цель."}
               </p>
             </>
           )}

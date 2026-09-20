@@ -187,7 +187,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       locked: false,
       breaches: 0,
       wave: 0,
-      message: "Свободный полёт. Пауза — выход в ангар.",
+      message: "Свободный полёт. T — скан, автоприцел в ангаре. Пауза — выход.",
     });
     input.requestLock();
   }
@@ -215,7 +215,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       waves: infil.waves,
       breaches: 0,
       breachMax: infil.breachMax,
-      message: "Оборона линии. Не дайте пехоте пересечь красную ленту.",
+      message: "Оборона линии. T — скан сектора. Не дайте пехоте пересечь красную ленту.",
     });
     input.requestLock();
   }
@@ -406,6 +406,10 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
         crashed = true;
         kami = e.kamikaze;
       }
+      if (e.type === "scan") {
+        audio.scan();
+        useGameStore.getState().patch({ message: "СКАНИРОВАНИЕ СЕКТОРА" });
+      }
     }
     if (floats.length !== st.floats.length) useGameStore.getState().patch({ floats });
 
@@ -447,7 +451,10 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     for (const e of ev) {
       if (e.type === "spotted") audio.warning();
       if (e.type === "lock") audio.lock();
-      if (e.type === "dive") audio.warning();
+      if (e.type === "dive") {
+        audio.warning();
+        audio.rumble(160, 0.55);
+      }
       if (e.type === "step") audio.step();
       if (e.type === "boom") {
         audio.explode(1.2);
@@ -505,6 +512,12 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
         hunters: ground.hunters.filter((h) => h.state !== "dead").length,
         lock: null,
         hitFlash: Math.max(0, st.hitFlash - dt * 3),
+        pad: input.padConnected(),
+        windDeg: 0,
+        windGust: 0,
+        scanning: 0,
+        scanMarks: [],
+        onPad: false,
       });
       return;
     }
@@ -513,6 +526,13 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     if (lock && !lastLock) audio.lock();
     lastLock = !!lock;
     const heading = ((-sim.drone.yaw * 180) / Math.PI + 36000) % 360;
+    const wind = sim.getWind();
+    const windDeg = ((Math.atan2(-wind.x, -wind.z) * 180) / Math.PI + 36000) % 360;
+    const scanMarks = sim.pickScan(camera, canvas.clientWidth, canvas.clientHeight);
+    let msg = st.message;
+    if (sim.scanning > 0.05) msg = "СКАНИРОВАНИЕ СЕКТОРА";
+    else if (sim.onPad && st.mode === "free") msg = "ПЛОЩАДКА · посадка";
+    else if (msg === "СКАНИРОВАНИЕ СЕКТОРА" || msg === "ПЛОЩАДКА · посадка") msg = "";
     useGameStore.getState().patch({
       weapon: sim.weapon,
       ammo: { ...sim.ammo },
@@ -528,7 +548,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       droneX: sim.drone.pos.x,
       droneZ: sim.drone.pos.z,
       detect: 0,
-      locked: false,
+      locked: !!lock,
       wave: infil.wave,
       waves: infil.waves,
       breaches: infil.breaches,
@@ -545,9 +565,17 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
             screenY: lock.screenY,
             expected: lock.expected,
             weapon: lock.weapon,
+            assist: lock.assist,
           }
         : null,
       hitFlash: Math.max(0, st.hitFlash - dt * 3),
+      windDeg,
+      windGust: wind.gust,
+      scanning: sim.scanning,
+      scanMarks,
+      onPad: sim.onPad,
+      pad: input.padConnected(),
+      message: msg,
     });
     if (st.phase === "flight" && st.mode === "arcade") {
       if (infil.won) finish(true);
@@ -582,7 +610,8 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     audio.setMuted(st.muted);
     if (st.tod !== lastTod) applyTod(st.tod);
     if (st.weapon !== sim.weapon) sim.setWeapon(st.weapon);
-    const actions = input.sample(st.invertY);
+    input.setAssist(st.autoaim);
+    const actions = input.sample(st.invertY, isGround);
     const mouse = flying || replaying ? input.consumeMouse() : (input.consumeMouse(), { dx: 0, dy: 0 });
 
     if (replaying) {

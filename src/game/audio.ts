@@ -11,6 +11,8 @@ export type GameAudio = {
   lock: () => void;
   warning: () => void;
   crash: () => void;
+  scan: () => void;
+  rumble: (ms: number, strong?: number) => void;
   dispose: () => void;
 };
 
@@ -107,6 +109,27 @@ export function createAudio(): GameAudio {
     return buf;
   }
 
+  function rumblePad(ms: number, strong: number) {
+    if (typeof navigator === "undefined" || typeof navigator.getGamepads !== "function") return;
+    let list: (Gamepad | null)[] = [];
+    try {
+      list = navigator.getGamepads();
+    } catch {
+      return;
+    }
+    const mag = Math.max(0, Math.min(1, strong));
+    for (const p of list) {
+      const act = p?.vibrationActuator as GamepadHapticActuator | undefined;
+      if (!act || typeof act.playEffect !== "function") continue;
+      void act.playEffect("dual-rumble", {
+        startDelay: 0,
+        duration: ms,
+        weakMagnitude: mag * 0.55,
+        strongMagnitude: mag,
+      });
+    }
+  }
+
   return {
     unlock,
     setMuted: (m) => {
@@ -194,6 +217,7 @@ export function createAudio(): GameAudio {
       og.connect(sfx!);
       osc.start(t);
       osc.stop(t + 0.45);
+      rumblePad(220 + size * 80, 0.4 + size * 0.2);
     },
     hit: () => {
       const c = ensure();
@@ -224,6 +248,7 @@ export function createAudio(): GameAudio {
       g.connect(sfx!);
       osc.start(t);
       osc.stop(t + 0.06);
+      rumblePad(40, 0.18);
     },
     warning: () => {
       const c = ensure();
@@ -248,7 +273,34 @@ export function createAudio(): GameAudio {
       src.connect(g);
       g.connect(sfx!);
       src.start(t);
+      rumblePad(280, 0.85);
     },
+    scan: () => {
+      const c = ensure();
+      const t = c.currentTime;
+      const osc = c.createOscillator();
+      const g = c.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(620, t);
+      osc.frequency.exponentialRampToValueAtTime(1480, t + 0.22);
+      env(g, t, 0.01, 0.28, 0.12);
+      osc.connect(g);
+      g.connect(sfx!);
+      osc.start(t);
+      osc.stop(t + 0.32);
+      const osc2 = c.createOscillator();
+      const g2 = c.createGain();
+      osc2.type = "triangle";
+      osc2.frequency.setValueAtTime(240, t);
+      osc2.frequency.exponentialRampToValueAtTime(80, t + 0.18);
+      env(g2, t, 0.004, 0.2, 0.08);
+      osc2.connect(g2);
+      g2.connect(sfx!);
+      osc2.start(t);
+      osc2.stop(t + 0.22);
+      rumblePad(90, 0.2);
+    },
+    rumble: (ms, strong = 0.45) => rumblePad(ms, strong),
     dispose: () => {
       try {
         propOsc?.stop();

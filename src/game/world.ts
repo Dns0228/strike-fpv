@@ -21,6 +21,7 @@ export type WorldApi = {
   roads: Array<Array<[number, number]>>;
   tick: (t: number, camera: THREE.Camera) => void;
   setNight: (on: boolean) => void;
+  getWind: () => { x: number; z: number; gust: number };
   dispose: () => void;
 };
 
@@ -1303,7 +1304,20 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
     return "grass";
   }
 
+  let windAng = 0.82;
+  let windGust = 0;
+
+  function updateWind(t: number) {
+    windAng = 0.72 + Math.sin(t * 0.037) * 0.62 + Math.sin(t * 0.013) * 0.38;
+    windGust = Math.max(0, Math.sin(t * 0.71) * 0.82 + Math.sin(t * 1.73) * 0.38 - 0.32);
+  }
+
+  function getWind() {
+    return { x: Math.cos(windAng), z: Math.sin(windAng), gust: windGust };
+  }
+
   function tick(t: number, camera: THREE.Camera) {
+    updateWind(t);
     for (let i = 0; i < rp.count; i++) {
       const x = riverBase[i * 3];
       const z = riverBase[i * 3 + 2];
@@ -1340,11 +1354,12 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
       const arr = w.mesh.instanceMatrix.array as Float32Array;
       arr.set(w.base);
       const n = w.mesh.count;
+      const gust = 0.72 + windGust * 1.15;
       for (let i = 0; i < n; i++) {
         const o = i * 16;
         const x = arr[o + 12];
         const z = arr[o + 14];
-        const lean = Math.sin(t * 1.55 + x * 0.11 + z * 0.09 + w.phase) * w.amp;
+        const lean = Math.sin(t * 1.55 + x * 0.11 + z * 0.09 + w.phase) * w.amp * gust;
         arr[o + 4] += lean;
         arr[o + 6] += lean * 0.35;
       }
@@ -1380,6 +1395,7 @@ export function buildWorld(scene: THREE.Scene): WorldApi {
     roads: ROADS,
     tick,
     setNight,
+    getWind,
     dispose: () => {
       scene.remove(group);
       group.clear();

@@ -40,6 +40,7 @@ export function TouchControls({ game }: Props) {
         ) : (
           <>
             <HoldButton label="Огонь" onHold={(v) => game?.input.setTouchFire(v)} primary />
+            <TapButton label="Скан" onTap={() => game?.input.setTouchScan()} />
             <HoldButton label="Подрыв" onHold={(v) => game?.input.setTouchDetonate(v)} />
           </>
         )}
@@ -165,6 +166,23 @@ function Stick({
         </div>
       </div>
     </div>
+  );
+}
+
+function TapButton({ label, onTap }: { label: string; onTap: () => void }) {
+  return (
+    <button
+      type="button"
+      className="h-14 min-w-[3.5rem] rounded-md border border-border bg-surface/80 px-3 font-mono text-[11px] tracking-widest uppercase text-muted active:scale-95"
+      style={{ touchAction: "none" }}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onTap();
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

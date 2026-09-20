@@ -16,6 +16,15 @@ export type LockInfo = {
   screenY: number;
   expected: number;
   weapon: WeaponId;
+  assist?: boolean;
+};
+
+export type ScanMark = {
+  id: number;
+  x: number;
+  y: number;
+  dist: number;
+  label: string;
 };
 
 export type FloatText = {
@@ -71,6 +80,7 @@ export type GameHud = {
   shake: boolean;
   muted: boolean;
   tod: "day" | "night";
+  autoaim: boolean;
   blips: RadarBlip[];
   droneX: number;
   droneZ: number;
@@ -84,6 +94,12 @@ export type GameHud = {
   breaches: number;
   breachMax: number;
   replay: ReplayHudInfo | null;
+  windDeg: number;
+  windGust: number;
+  scanning: number;
+  scanMarks: ScanMark[];
+  onPad: boolean;
+  pad: boolean;
   patch: (partial: Partial<Omit<GameHud, "patch">>) => void;
 };
 
@@ -107,6 +123,7 @@ function persistSettings() {
       mode: st.mode,
       unit: st.unit,
       tod: st.tod,
+      autoaim: st.autoaim,
     }),
   );
 }
@@ -123,6 +140,7 @@ export function loadSettings(): void {
       mode?: GameMode;
       unit?: GroundUnit;
       tod?: "day" | "night";
+      autoaim?: boolean;
     };
     useGameStore.getState().patch({
       invertY: !!s.invertY,
@@ -131,6 +149,7 @@ export function loadSettings(): void {
       mode: parseMode(s.mode),
       unit: s.unit === "jeep" ? "jeep" : "soldier",
       tod: s.tod === "night" ? "night" : "day",
+      autoaim: s.autoaim !== false,
     });
   } catch {
     /* ignore */
@@ -161,6 +180,7 @@ export const useGameStore = create<GameHud>((set) => ({
   shake: true,
   muted: false,
   tod: "day",
+  autoaim: true,
   blips: [],
   droneX: 0,
   droneZ: 0,
@@ -174,6 +194,12 @@ export const useGameStore = create<GameHud>((set) => ({
   breaches: 0,
   breachMax: 3,
   replay: null,
+  windDeg: 70,
+  windGust: 0,
+  scanning: 0,
+  scanMarks: [],
+  onPad: false,
+  pad: false,
   patch: (partial) => {
     set(partial);
     if (
@@ -182,7 +208,8 @@ export const useGameStore = create<GameHud>((set) => ({
       "shake" in partial ||
       "mode" in partial ||
       "unit" in partial ||
-      "tod" in partial
+      "tod" in partial ||
+      "autoaim" in partial
     ) {
       persistSettings();
     }

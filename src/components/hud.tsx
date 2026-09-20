@@ -133,11 +133,19 @@ function FpvHud() {
   const breaches = useGameStore((s) => s.breaches);
   const breachMax = useGameStore((s) => s.breachMax);
   const tod = useGameStore((s) => s.tod);
+  const windDeg = useGameStore((s) => s.windDeg);
+  const windGust = useGameStore((s) => s.windGust);
+  const scanning = useGameStore((s) => s.scanning);
+  const scanMarks = useGameStore((s) => s.scanMarks);
+  const onPad = useGameStore((s) => s.onPad);
+  const pad = useGameStore((s) => s.pad);
+  const autoaim = useGameStore((s) => s.autoaim);
 
   const batTone = battery < 18 ? "text-danger" : battery < 40 ? "text-warn" : "text-hud";
   const yaw = (-heading * Math.PI) / 180;
   const free = mode === "free";
   const arcade = mode === "arcade";
+  const windRel = ((windDeg - heading + 540) % 360) - 180;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-mono text-hud">
@@ -151,7 +159,8 @@ function FpvHud() {
       {hitFlash > 0.05 ? (
         <div className="absolute inset-0 bg-accent/10" style={{ opacity: hitFlash * 0.45 }} />
       ) : null}
-      <div className="fpv-scan absolute inset-0" />
+      <div className={`fpv-scan absolute inset-0 ${scanning > 0.05 ? "fpv-scan-hot" : ""}`} />
+      {scanning > 0.05 ? <div className="fpv-scan-flash absolute inset-0" /> : null}
 
       <div className="absolute left-1/2 top-1/2 size-8 -translate-x-1/2 -translate-y-1/2">
         <span className="absolute left-1/2 top-0 h-2 w-px -translate-x-1/2 bg-hud" />
@@ -171,6 +180,8 @@ function FpvHud() {
                 ? `ВОЛНА ${wave}/${waves} · ПРОРЫВ ${breaches}/${breachMax}`
                 : `ЦЕЛИ ${destroyed}/${total}`}
             <span className="ml-2 text-hud-dim">{tod === "night" ? "НОЧЬ" : "ДЕНЬ"}</span>
+            {pad ? <span className="ml-2 text-ok">PAD</span> : null}
+            {autoaim ? <span className="ml-2 text-hud-dim">АВТО</span> : null}
           </div>
         </div>
         <div className="flex items-start gap-3">
@@ -188,12 +199,18 @@ function FpvHud() {
         </div>
       </header>
 
-      <Compass heading={heading} />
+      <Compass heading={heading} windRel={windRel} gust={windGust} />
 
       <div className="absolute left-3 top-1/3 space-y-3 text-[11px] tabular md:left-5 short:top-20 short:left-[max(0.75rem,env(safe-area-inset-left))] short:space-y-2">
         <Readout k="SPD" v={`${speed.toFixed(0)}`} u="м/с" />
         <Readout k="ALT" v={`${altitude.toFixed(0)}`} u="м" />
         <Readout k="HDG" v={`${heading.toFixed(0).padStart(3, "0")}`} u="°" />
+        <Readout
+          k="ВЕТЕР"
+          v={`${Math.abs(windRel).toFixed(0)}`}
+          u={windRel >= 0 ? "→" : "←"}
+          tone={windGust > 0.45 ? "text-warn" : "text-hud"}
+        />
       </div>
 
       <div className="absolute right-3 top-1/3 space-y-3 text-right text-[11px] tabular md:right-5 short:top-20 short:right-[max(0.75rem,env(safe-area-inset-right))] short:space-y-2">
@@ -203,9 +220,24 @@ function FpvHud() {
 
       <Minimap blips={blips} x={droneX} z={droneZ} yaw={yaw} frontZ={FRONT_Z} />
 
+      {scanMarks.map((m) => (
+        <div
+          key={m.id}
+          className="absolute -translate-x-1/2 -translate-y-1/2 border border-hud/50"
+          style={{ left: m.x, top: m.y, width: 22, height: 22 }}
+        >
+          <div className="absolute left-1/2 top-0 h-1 w-px -translate-x-1/2 bg-hud" />
+          <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px] tracking-widest text-hud">
+            {m.dist.toFixed(0)}
+          </div>
+        </div>
+      ))}
+
       {lock ? (
         <div
-          className="absolute -translate-x-1/2 -translate-y-1/2 border border-hud/80 px-2 py-1"
+          className={`absolute -translate-x-1/2 -translate-y-1/2 border px-2 py-1 ${
+            lock.assist ? "border-hud" : "border-hud/80"
+          }`}
           style={{ left: lock.screenX, top: lock.screenY, width: 88, height: 64 }}
         >
           <div className="absolute -left-1 -top-1 size-2 border-l border-t border-hud" />
@@ -216,6 +248,7 @@ function FpvHud() {
             <div className="text-fg">{lock.label}</div>
             <div className="text-hud-dim">
               {ARMOR_LABEL[lock.armor]} · {lock.dist.toFixed(0)} м
+              {lock.assist ? " · АВТО" : ""}
             </div>
             <div className="mt-0.5 h-1 w-24 bg-border">
               <div
@@ -242,6 +275,13 @@ function FpvHud() {
 
       <footer className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-5 short:p-2 short:pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {message ? <p className="text-[11px] tracking-wide text-muted">{message}</p> : null}
+        {onPad && free ? (
+          <p className="text-[10px] tracking-[0.2em] text-ok uppercase">Площадка</p>
+        ) : null}
+        <p className="hidden text-[10px] tracking-wide text-subtle md:block coarse:hidden">
+          T скан · {autoaim ? "автоприцел вкл" : "автоприцел выкл"}
+          {pad ? " · геймпад" : ""}
+        </p>
         <div className="flex gap-1">
           {WEAPON_ORDER.map((id, i) => {
             const active = id === weapon;
@@ -265,7 +305,7 @@ function FpvHud() {
   );
 }
 
-function Compass({ heading }: { heading: number }) {
+function Compass({ heading, windRel, gust }: { heading: number; windRel?: number; gust?: number }) {
   return (
     <div className="absolute left-1/2 top-14 w-52 -translate-x-1/2 overflow-hidden md:top-16 md:w-72 short:top-10 short:w-44">
       <div className="relative h-7 border-b border-hud/35">
@@ -288,6 +328,14 @@ function Compass({ heading }: { heading: number }) {
           );
         })}
         <div className="absolute left-1/2 top-0 h-2.5 w-px -translate-x-1/2 bg-fg" />
+        {windRel != null ? (
+          <div
+            className="absolute top-0 -translate-x-1/2 text-[8px] text-warn"
+            style={{ left: `${50 + Math.max(-42, Math.min(42, windRel * 0.72))}%` }}
+          >
+            {gust && gust > 0.35 ? "▲" : "△"}
+          </div>
+        ) : null}
       </div>
     </div>
   );

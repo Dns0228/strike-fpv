@@ -19,6 +19,7 @@ export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
   const invertY = useGameStore((s) => s.invertY);
   const muted = useGameStore((s) => s.muted);
   const tod = useGameStore((s) => s.tod);
+  const autoaim = useGameStore((s) => s.autoaim);
   const wave = useGameStore((s) => s.wave);
   const breaches = useGameStore((s) => s.breaches);
   const patch = useGameStore((s) => s.patch);
@@ -110,6 +111,17 @@ export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
               className="size-3.5 accent-hud"
             />
             Ночь
+          </label>
+        ) : null}
+        {paused && !ground ? (
+          <label className="mt-2 flex items-center gap-2 text-xs text-subtle">
+            <input
+              type="checkbox"
+              checked={autoaim}
+              onChange={(e) => patch({ autoaim: e.target.checked })}
+              className="size-3.5 accent-hud"
+            />
+            Автоприцел
           </label>
         ) : null}
 
