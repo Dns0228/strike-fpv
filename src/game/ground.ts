@@ -496,7 +496,8 @@ export function createGround(scene: THREE.Scene, world: WorldApi) {
           events.push({ type: "dive" });
         }
       } else {
-        h.lock = Math.max(0, h.lock - dt * 0.45);
+        const cover = world.coverAt(player.pos.x, player.pos.z);
+        h.lock = Math.max(0, h.lock - dt * (0.45 + cover * 1.25));
         if (h.lock <= 0.05 && h.state === "search") h.state = "patrol";
       }
 

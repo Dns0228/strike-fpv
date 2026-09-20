@@ -118,6 +118,8 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
   let fireLatch = false;
   let lastTod: "day" | "night" | null = null;
   let lastVision: VisionMode | null = null;
+  let radioT = 9;
+  let boomT = 16;
 
   const best = Number(localStorage.getItem(BEST_SCORE_KEY) || "0") || 0;
   const bestGround = Number(localStorage.getItem(BEST_GROUND_KEY) || "0") || 0;
@@ -214,6 +216,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     sim.setTargetBeacons(true);
     sim.setRules({ mortal: false, drainMul: 0.32 });
     sim.setWeapon(useGameStore.getState().weapon);
+    sim.setPatrols(true);
     setPhase("flight");
     useGameStore.getState().patch({
       score: 0,
@@ -226,7 +229,9 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       locked: false,
       breaches: 0,
       wave: 0,
-      message: "Свободный полёт. T — скан, автоприцел в ангаре. Пауза — выход.",
+      debrief: null,
+      aaLock: 0,
+      message: "Свободный полёт. ЗРК бьёт по борту — жми к земле. Площадка заряжает. T — скан.",
     });
     input.requestLock();
   }
@@ -238,6 +243,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     sim.setTargetBeacons(false);
     sim.setRules({ mortal: true, drainMul: 1 });
     sim.setWeapon(useGameStore.getState().weapon);
+    sim.setPatrols(false);
     infil.setActive(true);
     infil.reset();
     setPhase("flight");
@@ -254,6 +260,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       waves: infil.waves,
       breaches: 0,
       breachMax: infil.breachMax,
+      debrief: null,
       message: "Оборона линии. T — скан сектора. Не дайте пехоте пересечь красную ленту.",
     });
     input.requestLock();
@@ -265,6 +272,7 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     sim.setStaticIdle(true);
     sim.setTargetBeacons(false);
     sim.setRules({ mortal: true, drainMul: 1 });
+    sim.setPatrols(false);
     ground.reset(useGameStore.getState().unit);
     ground.snapCam(camera);
     fpvRig.visible = false;
@@ -277,7 +285,8 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       replay: null,
       detect: 0,
       locked: false,
-      message: "W — ход, мышь — камера. Зелёный круг на ленте. Прячьтесь в рощах и у домов.",
+      debrief: null,
+      message: "W — ход, мышь — камера. Зелёный круг на ленте. В рощах захват FPV сбрасывается быстрее.",
     });
     input.requestLock();
   }
@@ -348,7 +357,9 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     }
     setPhase(win ? "victory" : "dead");
     const def = MODES[mode];
+    const debrief = mode === "assault" ? null : sim.getDebrief();
     useGameStore.getState().patch({
+      debrief,
       message: win
         ? mode === "assault"
           ? "Вышли на линию фронта."
@@ -448,6 +459,17 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       if (e.type === "scan") {
         audio.scan();
         useGameStore.getState().patch({ message: "СКАНИРОВАНИЕ СЕКТОРА" });
+      }
+      if (e.type === "aa") {
+        audio.warning();
+        useGameStore.getState().patch({ message: "ПВО ЗАХВАТ", hitFlash: 0.35 });
+      }
+      if (e.type === "flak") {
+        audio.flak();
+        audio.rumble(90, 0.4);
+      }
+      if (e.type === "rearm") {
+        useGameStore.getState().patch({ message: "ПЛОЩАДКА · зарядка" });
       }
     }
     if (floats.length !== st.floats.length) useGameStore.getState().patch({ floats });
@@ -589,10 +611,18 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
     const wind = sim.getWind();
     const windDeg = ((Math.atan2(-wind.x, -wind.z) * 180) / Math.PI + 36000) % 360;
     const scanMarks = sim.pickScan(camera, canvas.clientWidth, canvas.clientHeight);
+    const aa = sim.getAaThreat();
     let msg = st.message;
     if (sim.scanning > 0.05) msg = "СКАНИРОВАНИЕ СЕКТОРА";
-    else if (sim.onPad && st.mode === "free") msg = "ПЛОЩАДКА · посадка";
-    else if (msg === "СКАНИРОВАНИЕ СЕКТОРА" || msg === "ПЛОЩАДКА · посадка") msg = "";
+    else if (aa.lock > 0.72) msg = `ПВО · ${aa.label}`;
+    else if (sim.onPad && st.mode === "free") msg = "ПЛОЩАДКА · зарядка";
+    else if (
+      msg === "СКАНИРОВАНИЕ СЕКТОРА" ||
+      msg === "ПЛОЩАДКА · посадка" ||
+      msg === "ПЛОЩАДКА · зарядка" ||
+      msg.startsWith("ПВО")
+    )
+      msg = aa.lock > 0.35 ? `ПВО · ${aa.label}` : "";
     useGameStore.getState().patch({
       weapon: sim.weapon,
       ammo: { ...sim.ammo },
@@ -635,6 +665,9 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
       scanMarks,
       onPad: sim.onPad,
       pad: input.padConnected(),
+      aaLock: aa.lock,
+      aaLabel: aa.label,
+      aaDist: aa.dist,
       message: msg,
     });
     if (st.phase === "flight" && st.mode === "arcade") {
@@ -726,6 +759,16 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
         audio.props(0);
         audio.engine(jeep ? 0.25 + ground.getSpeed() / 22 : 0);
         audio.buzz(ground.player.detect);
+        radioT -= dt;
+        boomT -= dt;
+        if (radioT <= 0) {
+          audio.radio();
+          radioT = 14 + Math.random() * 18;
+        }
+        if (boomT <= 0) {
+          audio.farBoom();
+          boomT = 20 + Math.random() * 24;
+        }
         followSun(ground.player.pos.x, ground.player.pos.z);
         handleGroundEvents();
       } else if (flying) {
@@ -748,9 +791,20 @@ export function createGame(canvas: HTMLCanvasElement): GameHandle {
             }
           }
         }
+        const aaNow = sim.getAaThreat();
         audio.props(sim.drone.throttle);
         audio.engine(0);
-        audio.buzz(0);
+        audio.buzz(aaNow.lock);
+        radioT -= dt;
+        boomT -= dt;
+        if (radioT <= 0) {
+          audio.radio();
+          radioT = 11 + Math.random() * 16;
+        }
+        if (boomT <= 0) {
+          audio.farBoom();
+          boomT = 16 + Math.random() * 22;
+        }
         fpvRig.visible = true;
         fpvRig.traverse((o) => {
           if (o.userData.prop) o.rotation.z += dt * (12 + sim.drone.throttle * 40);

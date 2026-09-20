@@ -24,6 +24,7 @@ export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
   const vision = useGameStore((s) => s.vision);
   const wave = useGameStore((s) => s.wave);
   const breaches = useGameStore((s) => s.breaches);
+  const debrief = useGameStore((s) => s.debrief);
   const patch = useGameStore((s) => s.patch);
   const ground = isGroundSeat(mode);
   const arcade = mode === "arcade";
@@ -81,6 +82,13 @@ export function Overlays({ onResume, onRestart, onNext, onHangar }: Props) {
           />
           <Mini k="Рекорд" v={String(ground ? bestGround : best)} />
         </dl>
+        {debrief && !paused ? (
+          <dl className="mt-2 grid grid-cols-3 gap-2 text-center">
+            <Mini k="Время" v={fmtTime(debrief.time)} />
+            <Mini k="ПВО" v={String(debrief.flakHits)} />
+            <Mini k="Зарядки" v={String(debrief.rearm)} />
+          </dl>
+        ) : null}
 
         {paused ? (
           <label className="mt-4 flex items-center gap-2 text-xs text-subtle">
@@ -164,6 +172,12 @@ function Mini({ k, v }: { k: string; v: string }) {
       <dd className="font-mono text-sm tabular text-fg">{v}</dd>
     </div>
   );
+}
+
+function fmtTime(t: number) {
+  const s = Math.max(0, Math.floor(t));
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, "0")}`;
 }
 
 function Primary({ onClick, children }: { onClick: () => void; children: ReactNode }) {

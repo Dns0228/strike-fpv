@@ -154,6 +154,9 @@ function FpvHud() {
   const pad = useGameStore((s) => s.pad);
   const autoaim = useGameStore((s) => s.autoaim);
   const vision = useGameStore((s) => s.vision);
+  const aaLock = useGameStore((s) => s.aaLock);
+  const aaLabel = useGameStore((s) => s.aaLabel);
+  const aaDist = useGameStore((s) => s.aaDist);
 
   const batTone = battery < 18 ? "text-danger" : battery < 40 ? "text-warn" : "text-hud";
   const yaw = (-heading * Math.PI) / 180;
@@ -232,6 +235,14 @@ function FpvHud() {
       <div className="absolute right-3 top-1/3 space-y-3 text-right text-[11px] tabular md:right-5 short:top-20 short:right-[max(0.75rem,env(safe-area-inset-right))] short:space-y-2">
         <Readout k="АКБ" v={`${battery.toFixed(0)}`} u="%" tone={batTone} />
         <Readout k="БОРТ" v={free ? "∞" : `${lives}`} u={free ? "" : "/ 3"} />
+        {aaLock > 0.08 ? (
+          <Readout
+            k="ПВО"
+            v={aaLabel || "захват"}
+            u={aaDist > 0 ? `${aaDist.toFixed(0)}м` : `${Math.round(aaLock * 100)}%`}
+            tone={aaLock > 0.7 ? "text-danger" : "text-warn"}
+          />
+        ) : null}
       </div>
 
       <Minimap blips={blips} x={droneX} z={droneZ} yaw={yaw} frontZ={FRONT_Z} />
@@ -292,7 +303,10 @@ function FpvHud() {
       <footer className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-5 short:p-2 short:pb-[max(0.4rem,env(safe-area-inset-bottom))]">
         {message ? <p className="text-[11px] tracking-wide text-muted">{message}</p> : null}
         {onPad && free ? (
-          <p className="text-[10px] tracking-[0.2em] text-ok uppercase">Площадка</p>
+          <p className="text-[10px] tracking-[0.2em] text-ok uppercase">Площадка · зарядка</p>
+        ) : null}
+        {aaLock > 0.72 ? (
+          <p className="text-[10px] tracking-[0.22em] text-danger uppercase">ПВО захват</p>
         ) : null}
         <p className="hidden text-[10px] tracking-wide text-subtle md:block coarse:hidden">
           T скан · N тепло/ПНВ · {autoaim ? "автоприцел вкл" : "автоприцел выкл"}

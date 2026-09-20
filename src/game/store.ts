@@ -56,6 +56,14 @@ export type ReplayHudInfo = {
   impacted: boolean;
 };
 
+export type SortieDebrief = {
+  time: number;
+  score: number;
+  destroyed: number;
+  flakHits: number;
+  rearm: number;
+};
+
 export type GameHud = {
   phase: Phase;
   mode: GameMode;
@@ -105,6 +113,10 @@ export type GameHud = {
   threatDist: number;
   threatLabel: string;
   nearGoal: boolean;
+  aaLock: number;
+  aaLabel: string;
+  aaDist: number;
+  debrief: SortieDebrief | null;
   patch: (partial: Partial<Omit<GameHud, "patch">>) => void;
 };
 
@@ -213,6 +225,10 @@ export const useGameStore = create<GameHud>((set) => ({
   threatDist: 0,
   threatLabel: "",
   nearGoal: false,
+  aaLock: 0,
+  aaLabel: "",
+  aaDist: 0,
+  debrief: null,
   patch: (partial) => {
     set(partial);
     if (

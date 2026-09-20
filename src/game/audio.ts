@@ -14,6 +14,9 @@ export type GameAudio = {
   scan: () => void;
   extract: () => void;
   rumble: (ms: number, strong?: number) => void;
+  flak: () => void;
+  radio: () => void;
+  farBoom: () => void;
   dispose: () => void;
 };
 
@@ -325,6 +328,85 @@ export function createAudio(): GameAudio {
       osc2.start(t);
       osc2.stop(t + 0.45);
       rumblePad(220, 0.35);
+    },
+    flak: () => {
+      const c = ensure();
+      const t = c.currentTime;
+      const osc = c.createOscillator();
+      const g = c.createGain();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(980, t);
+      osc.frequency.exponentialRampToValueAtTime(140, t + 0.09);
+      env(g, t, 0.002, 0.1, 0.2);
+      osc.connect(g);
+      g.connect(sfx!);
+      osc.start(t);
+      osc.stop(t + 0.12);
+      const src = c.createBufferSource();
+      src.buffer = noiseBuffer(0.12);
+      const filt = c.createBiquadFilter();
+      filt.type = "highpass";
+      filt.frequency.value = 900;
+      const ng = c.createGain();
+      env(ng, t, 0.001, 0.1, 0.22);
+      src.connect(filt);
+      filt.connect(ng);
+      ng.connect(sfx!);
+      src.start(t);
+      rumblePad(70, 0.35);
+    },
+    radio: () => {
+      const c = ensure();
+      const t = c.currentTime;
+      for (let i = 0; i < 3; i++) {
+        const osc = c.createOscillator();
+        const g = c.createGain();
+        osc.type = "square";
+        osc.frequency.value = 380 + i * 70 + (i === 1 ? 120 : 0);
+        env(g, t + i * 0.09, 0.004, 0.07, 0.045);
+        osc.connect(g);
+        g.connect(sfx!);
+        osc.start(t + i * 0.09);
+        osc.stop(t + i * 0.09 + 0.09);
+      }
+      const src = c.createBufferSource();
+      src.buffer = noiseBuffer(0.32);
+      const filt = c.createBiquadFilter();
+      filt.type = "bandpass";
+      filt.frequency.value = 1400;
+      filt.Q.value = 1.6;
+      const ng = c.createGain();
+      env(ng, t, 0.02, 0.28, 0.04);
+      src.connect(filt);
+      filt.connect(ng);
+      ng.connect(sfx!);
+      src.start(t);
+    },
+    farBoom: () => {
+      const c = ensure();
+      const t = c.currentTime;
+      const src = c.createBufferSource();
+      src.buffer = noiseBuffer(0.7);
+      const filt = c.createBiquadFilter();
+      filt.type = "lowpass";
+      filt.frequency.setValueAtTime(220, t);
+      filt.frequency.exponentialRampToValueAtTime(50, t + 0.55);
+      const g = c.createGain();
+      env(g, t, 0.02, 0.62, 0.14);
+      src.connect(filt);
+      filt.connect(g);
+      g.connect(sfx!);
+      src.start(t);
+      const osc = c.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(48, t);
+      osc.frequency.exponentialRampToValueAtTime(22, t + 0.5);
+      const og = c.createGain();
+      env(og, t, 0.03, 0.5, 0.12);
+      osc.connect(og);
+      og.connect(sfx!);
+      osc.start(t);
+      osc.stop(t + 0.55);
     },
     rumble: (ms, strong = 0.45) => rumblePad(ms, strong),
     dispose: () => {

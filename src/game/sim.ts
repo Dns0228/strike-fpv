@@ -5,6 +5,7 @@ import {
   DRONE_LIVES,
   expectedDamage,
   KAMIKAZE,
+  ROAD_PATHS,
   TARGETS,
   WEAPON_ORDER,
   WEAPONS,
@@ -14,7 +15,7 @@ import {
   type VisionMode,
   type WeaponId,
 } from "./catalog";
-import { clamp, expDamp, wrapPi } from "./math";
+import { clamp, expDamp, lerp, wrapPi } from "./math";
 import type { Actions } from "./input";
 import type { KillcamSpec } from "./replay";
 import type { RadarBlip } from "./store";
@@ -48,6 +49,8 @@ export type Target = {
   smokeAcc: number;
   holdWreck: boolean;
   live: boolean;
+  aaLock: number;
+  aaCd: number;
 };
 
 export type DroneState = {
@@ -69,7 +72,10 @@ export type CombatEvent =
   | { type: "crash"; kamikaze: boolean }
   | { type: "killcam"; spec: KillcamSpec }
   | { type: "lock" }
-  | { type: "scan" };
+  | { type: "scan" }
+  | { type: "flak" }
+  | { type: "aa" }
+  | { type: "rearm" };
 
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -146,6 +152,8 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       smokeAcc: 0,
       holdWreck: false,
       live: false,
+      aaLock: 0,
+      aaCd: 0,
     });
   }
 
@@ -288,6 +296,30 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
   const flashLight = new THREE.PointLight(0xffc27a, 0, 52, 2);
   scene.add(flashLight);
 
+  const flakGeo = new THREE.CylinderGeometry(0.03, 0.055, 0.82, 5);
+  const flakMat = new THREE.MeshBasicMaterial({ color: 0xff5a28 });
+  const flaks: Array<{
+    active: boolean;
+    pos: THREE.Vector3;
+    vel: THREE.Vector3;
+    life: number;
+    dmg: number;
+    mesh: THREE.Mesh;
+  }> = [];
+  for (let i = 0; i < 14; i++) {
+    const mesh = new THREE.Mesh(flakGeo, flakMat);
+    mesh.visible = false;
+    scene.add(mesh);
+    flaks.push({
+      active: false,
+      pos: new THREE.Vector3(),
+      vel: new THREE.Vector3(),
+      life: 0,
+      dmg: 8,
+      mesh,
+    });
+  }
+
   let weapon: WeaponId = "he";
   const ammo: Record<WeaponId, number> = {
     frag: WEAPONS.frag.ammo,
@@ -315,6 +347,21 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
   let onPad = false;
   let lockId = 0;
   let vision: VisionMode = "off";
+  let sortieTime = 0;
+  let flakHits = 0;
+  let rearmCount = 0;
+  let washAcc = 0;
+  let rearmT = 0;
+  let patrolOn = false;
+  type PatrolSlot = {
+    targetId: number;
+    path: number;
+    u: number;
+    dir: number;
+    kind: TargetKind;
+    deadT: number;
+  };
+  const patrolSlots: PatrolSlot[] = [];
 
   function paintHot(t: Target) {
     t.mesh.traverse((o) => {
@@ -486,6 +533,8 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     t.smokeAcc = 0;
     t.wreckTilt = 0;
     t.holdWreck = false;
+    t.aaLock = 0;
+    t.aaCd = 0;
     t.mesh.visible = true;
     t.mesh.scale.set(1, 1, 1);
     t.mesh.rotation.set(0, t.yaw, 0);
@@ -714,6 +763,248 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     return false;
   }
 
+  function hasLos(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+    for (let i = 1; i <= 6; i++) {
+      const t = i / 7;
+      if (buildingHit(ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t)) return false;
+    }
+    return true;
+  }
+
+  function aaProfile(kind: TargetKind) {
+    if (kind === "sam") return { range: 168, lockRate: 0.32, cd: 1.15, speed: 96, dmg: 16, spread: 0.07 };
+    if (kind === "radar") return { range: 125, lockRate: 0.4, cd: 1.55, speed: 78, dmg: 9, spread: 0.12 };
+    if (kind === "ifv") return { range: 54, lockRate: 0.55, cd: 0.38, speed: 110, dmg: 6, spread: 0.18 };
+    return null;
+  }
+
+  function fireFlak(t: Target, speed: number, dmg: number, spread: number) {
+    let p = flaks.find((f) => !f.active);
+    if (!p) return;
+    const muzzleY = t.pos.y + TARGETS[t.kind].height * 0.35;
+    const dist = Math.hypot(drone.pos.x - t.pos.x, drone.pos.y - muzzleY, drone.pos.z - t.pos.z);
+    const lead = dist / Math.max(12, speed);
+    _tmp.set(
+      drone.pos.x + drone.vel.x * lead + (Math.random() - 0.5) * spread * dist,
+      drone.pos.y + drone.vel.y * lead + (Math.random() - 0.5) * spread * dist * 0.45,
+      drone.pos.z + drone.vel.z * lead + (Math.random() - 0.5) * spread * dist,
+    );
+    _tmp2.set(_tmp.x - t.pos.x, _tmp.y - muzzleY, _tmp.z - t.pos.z);
+    if (_tmp2.lengthSq() < 1e-4) _tmp2.set(0, 1, -1);
+    _tmp2.normalize();
+    p.active = true;
+    p.dmg = dmg;
+    p.life = 2.4;
+    p.pos.set(t.pos.x, muzzleY, t.pos.z);
+    p.vel.copy(_tmp2).multiplyScalar(speed);
+    p.mesh.visible = true;
+    p.mesh.position.copy(p.pos);
+    p.mesh.quaternion.setFromUnitVectors(_yAxis, _tmp2);
+    spawnBurst(p.pos.x, p.pos.y, p.pos.z, 2, 5);
+  }
+
+  function stepAa(dt: number) {
+    if (!drone.alive) return;
+    for (const t of targets) {
+      const profile = aaProfile(t.kind);
+      if (!profile) continue;
+      t.aaCd = Math.max(0, t.aaCd - dt);
+      if (!t.alive || t.holdWreck) {
+        t.aaLock = 0;
+        continue;
+      }
+      if (onPad) {
+        t.aaLock = Math.max(0, t.aaLock - dt * 0.9);
+        continue;
+      }
+      const dx = drone.pos.x - t.pos.x;
+      const dy = drone.pos.y - t.pos.y;
+      const dz = drone.pos.z - t.pos.z;
+      const dist = Math.hypot(dx, dy, dz);
+      const alt = drone.pos.y - world.heightAt(drone.pos.x, drone.pos.z);
+      let range = profile.range;
+      if (t.kind === "sam") {
+        if (alt < 3.2) range *= 0.42;
+        else if (alt < 8) range *= 0.72;
+      }
+      const los =
+        dist < range + 8 &&
+        hasLos(t.pos.x, t.pos.y + 1.2, t.pos.z, drone.pos.x, drone.pos.y, drone.pos.z);
+      const was = t.aaLock;
+      if (los && dist < range) {
+        const close = 1 - dist / range;
+        t.aaLock = Math.min(1, t.aaLock + dt * profile.lockRate * (0.65 + close * 0.8));
+        if (was < 0.78 && t.aaLock >= 0.78) events.push({ type: "aa" });
+        if (t.aaLock >= 1 && t.aaCd <= 0) {
+          fireFlak(t, profile.speed, profile.dmg, profile.spread);
+          t.aaLock = 0.38;
+          t.aaCd = profile.cd;
+          events.push({ type: "flak" });
+        }
+      } else {
+        t.aaLock = Math.max(0, t.aaLock - dt * 0.55);
+      }
+    }
+  }
+
+  function updateFlak(dt: number) {
+    for (const p of flaks) {
+      if (!p.active) continue;
+      p.pos.addScaledVector(p.vel, dt);
+      p.life -= dt;
+      p.mesh.position.copy(p.pos);
+      if (p.vel.lengthSq() > 1e-4) {
+        _tmp.copy(p.vel).normalize();
+        p.mesh.quaternion.setFromUnitVectors(_yAxis, _tmp);
+      }
+      const gnd = world.heightAt(p.pos.x, p.pos.z);
+      const near = p.pos.distanceTo(drone.pos);
+      let done = p.life <= 0 || p.pos.y < gnd + 0.2 || buildingHit(p.pos.x, p.pos.y, p.pos.z);
+      if (drone.alive && drone.invuln <= 0 && near < 2.2) {
+        drone.battery = clamp(drone.battery - p.dmg, 0, 100);
+        trauma = Math.min(1, trauma + 0.42);
+        flakHits += 1;
+        events.push({
+          type: "hit",
+          damage: Math.round(p.dmg),
+          kill: false,
+          label: "ПВО",
+          x: drone.pos.x,
+          y: drone.pos.y,
+          z: drone.pos.z,
+        });
+        spawnBurst(p.pos.x, p.pos.y, p.pos.z, 8, 11);
+        flashLight.position.copy(p.pos);
+        flashLight.intensity = 28;
+        done = true;
+        if (drone.battery <= 0) crash(false);
+      } else if (done && near < 9) {
+        spawnBurst(p.pos.x, p.pos.y, p.pos.z, 4, 6);
+      }
+      if (done) {
+        p.active = false;
+        p.mesh.visible = false;
+      }
+    }
+  }
+
+  function pathLen(path: Array<[number, number]>) {
+    let tot = 0;
+    for (let i = 0; i < path.length - 1; i++) {
+      tot += Math.hypot(path[i + 1][0] - path[i][0], path[i + 1][1] - path[i][1]);
+    }
+    return tot || 1;
+  }
+
+  function samplePath(path: Array<[number, number]>, u: number) {
+    const uu = clamp(u, 0, 1);
+    const total = pathLen(path);
+    let d = uu * total;
+    for (let i = 0; i < path.length - 1; i++) {
+      const ax = path[i][0];
+      const az = path[i][1];
+      const bx = path[i + 1][0];
+      const bz = path[i + 1][1];
+      const seg = Math.hypot(bx - ax, bz - az);
+      if (d > seg && i < path.length - 2) {
+        d -= seg;
+        continue;
+      }
+      const t = seg < 1e-4 ? 0 : d / seg;
+      const x = lerp(ax, bx, t);
+      const z = lerp(az, bz, t);
+      const yaw = Math.atan2(-(bx - ax), -(bz - az));
+      return { x, z, yaw };
+    }
+    const last = path[path.length - 1];
+    return { x: last[0], z: last[1], yaw: 0 };
+  }
+
+  function spawnPatrolSlot(slot: PatrolSlot, u: number) {
+    const path = ROAD_PATHS[slot.path];
+    if (!path) return;
+    const p = samplePath(path, u);
+    slot.u = u;
+    slot.deadT = 0;
+    slot.targetId = spawnLive(slot.kind, p.x, p.z, p.yaw);
+  }
+
+  function setPatrols(on: boolean) {
+    for (const s of patrolSlots) {
+      const t = targets.find((it) => it.id === s.targetId);
+      if (!t) continue;
+      scene.remove(t.mesh);
+      const idx = targets.indexOf(t);
+      if (idx >= 0) targets.splice(idx, 1);
+    }
+    patrolSlots.length = 0;
+    patrolOn = on;
+    if (!on) return;
+    const defs: Array<Omit<PatrolSlot, "targetId" | "deadT">> = [
+      { path: 0, u: 0.12, dir: 1, kind: "jeep" },
+      { path: 0, u: 0.64, dir: -1, kind: "truck" },
+      { path: 1, u: 0.28, dir: 1, kind: "jeep" },
+    ];
+    for (const d of defs) {
+      const slot: PatrolSlot = { ...d, targetId: 0, deadT: 0 };
+      spawnPatrolSlot(slot, d.u);
+      patrolSlots.push(slot);
+    }
+  }
+
+  function stepPatrols(dt: number) {
+    if (!patrolOn) return;
+    for (const slot of patrolSlots) {
+      const path = ROAD_PATHS[slot.path];
+      if (!path) continue;
+      const t = targets.find((it) => it.id === slot.targetId);
+      if (!t || !t.alive) {
+        slot.deadT += dt;
+        if (slot.deadT > 22) {
+          if (t) {
+            scene.remove(t.mesh);
+            const idx = targets.indexOf(t);
+            if (idx >= 0) targets.splice(idx, 1);
+          }
+          spawnPatrolSlot(slot, slot.dir > 0 ? 0.06 : 0.94);
+        }
+        continue;
+      }
+      const speed = slot.kind === "truck" ? 5.4 : 7.2;
+      slot.u += (slot.dir * speed * dt) / pathLen(path);
+      if (slot.u >= 1) {
+        slot.u = 1;
+        slot.dir = -1;
+      } else if (slot.u <= 0) {
+        slot.u = 0;
+        slot.dir = 1;
+      }
+      const p = samplePath(path, slot.u);
+      syncLive(slot.targetId, p.x, world.heightAt(p.x, p.z), p.z, p.yaw);
+    }
+  }
+
+  function getAaThreat() {
+    let best = { lock: 0, label: "", dist: 0 };
+    for (const t of targets) {
+      if (!t.alive || t.aaLock <= 0.02) continue;
+      if (t.aaLock >= best.lock) {
+        best = { lock: t.aaLock, label: t.label, dist: t.pos.distanceTo(drone.pos) };
+      }
+    }
+    return best;
+  }
+
+  function getDebrief() {
+    return {
+      time: sortieTime,
+      score,
+      destroyed,
+      flakHits,
+      rearm: rearmCount,
+    };
+  }
+
   function step(dt: number, actions: Actions, mouse: { dx: number; dy: number }, invertY: boolean, flying: boolean) {
     if (hitstop > 0) {
       hitstop -= dt;
@@ -815,6 +1106,23 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
         drone.vel.y *= 0.42;
       }
     }
+    const needBat = drone.battery < BATTERY_MAX - 0.4;
+    const needAmmo = WEAPON_ORDER.some((id) => ammo[id] < WEAPONS[id].ammo);
+    if (onPad && drone.vel.length() < 8 && (needBat || needAmmo)) {
+      if (needBat) drone.battery = clamp(drone.battery + 28 * dt, 0, BATTERY_MAX);
+      rearmT += dt;
+      if (rearmT > 0.85) {
+        rearmT = 0;
+        for (const id of WEAPON_ORDER) {
+          if (ammo[id] < WEAPONS[id].ammo) {
+            ammo[id] += 1;
+            break;
+          }
+        }
+        rearmCount += 1;
+        events.push({ type: "rearm" });
+      }
+    } else rearmT = 0;
 
     const ground = world.heightAt(drone.pos.x, drone.pos.z) + 0.55;
     if (drone.pos.y < ground) {
@@ -826,6 +1134,22 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
         drone.vel.multiplyScalar(0.35);
       }
     }
+    const alt = drone.pos.y - (ground - 0.55);
+    if (alt < 3.8 && drone.throttle > 0.38) {
+      washAcc += dt * (0.55 + drone.throttle);
+      if (washAcc > 0.16) {
+        washAcc = 0;
+        const gy = ground - 0.4;
+        spawnSmoke(
+          drone.pos.x + (Math.random() - 0.5) * 1.6,
+          gy,
+          drone.pos.z + (Math.random() - 0.5) * 1.6,
+          1,
+        );
+        spawnBurst(drone.pos.x, gy + 0.15, drone.pos.z, 2, 3.2);
+      }
+    } else washAcc = 0;
+    sortieTime += dt;
     if (buildingHit(drone.pos.x, drone.pos.y, drone.pos.z)) {
       const spd = drone.vel.length();
       if (drone.invuln <= 0 && spd > 15) crash(spd > 20);
@@ -1104,7 +1428,12 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     let steps = 0;
     while (accumulator >= FIXED && steps < 5) {
       step(FIXED, actions, steps === 0 ? mouse : { dx: 0, dy: 0 }, invertY, flying);
-      if (flying && drone.alive) updateProjectiles(FIXED);
+      if (flying && drone.alive) {
+        updateProjectiles(FIXED);
+        stepAa(FIXED);
+        stepPatrols(FIXED);
+      }
+      updateFlak(FIXED);
       accumulator -= FIXED;
       steps++;
     }
@@ -1143,6 +1472,8 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
       smokeAcc: 0,
       holdWreck: false,
       live: true,
+      aaLock: 0,
+      aaCd: 0,
     };
     targets.push(t);
     return t.id;
@@ -1199,11 +1530,22 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     scanCd = 0;
     lockId = 0;
     onPad = false;
+    sortieTime = 0;
+    flakHits = 0;
+    rearmCount = 0;
+    washAcc = 0;
+    rearmT = 0;
+    patrolOn = false;
+    patrolSlots.length = 0;
     clearLive();
     for (const t of targets) restoreTarget(t);
     for (const p of pool) {
       p.active = false;
       p.mesh.visible = false;
+    }
+    for (const f of flaks) {
+      f.active = false;
+      f.mesh.visible = false;
     }
     for (const p of smokes) {
       p.life = 0;
@@ -1262,6 +1604,9 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     setStaticIdle,
     getTarget,
     setRules,
+    setPatrols,
+    getAaThreat,
+    getDebrief,
     puff: (x: number, y: number, z: number) => spawnSmoke(x, y, z, 1),
     boomAt: (x: number, y: number, z: number, power = 1) => {
       spawnBurst(x, y, z, 16, 18 * power);
@@ -1308,6 +1653,9 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
     get onPad() {
       return onPad;
     },
+    get sortieTime() {
+      return sortieTime;
+    },
     getWind: () => world.getWind(),
     getSpeed: () => drone.vel.length(),
     getYaw: () => drone.yaw,
@@ -1334,6 +1682,9 @@ export function createSim(scene: THREE.Scene, world: WorldApi) {
         scene.remove(s.mesh);
         (s.mesh.material as THREE.Material).dispose();
       }
+      for (const f of flaks) scene.remove(f.mesh);
+      flakGeo.dispose();
+      flakMat.dispose();
       projGeo.dispose();
       pGeo.dispose();
       pMat.dispose();
